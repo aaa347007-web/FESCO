@@ -1,0 +1,6 @@
+{
+  "name": "FESCO Bill Manager",
+  "description": "Professional FESCO electricity bill, reference number, commission, payment status, monthly ledger, PDF report, and JSON backup management app for shop use.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
