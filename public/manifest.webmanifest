@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "FESCO Bill Manager",
+  "short_name": "FESCO Bills",
+  "description": "Shop electricity bill, reference number, commission, monthly ledger, PDF report and backup manager.",
+  "theme_color": "#1D4ED8",
+  "background_color": "#F8FAFC",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
