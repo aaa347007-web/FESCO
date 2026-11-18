@@ -1,59 +1,14 @@
-name: Build Android APK
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import { defineConfig } from 'vite';
 
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Java JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: Install dependencies & Capacitor
-        run: |
-          npm install --legacy-peer-deps
-          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
-
-      - name: Build Web App
-        run: npm run build
-
-      - name: Initialize & Sync Android Project
-        run: |
-          npx cap add android
-          npx cap sync android
-
-      - name: Fix Kotlin Duplicate Class Conflict
-        run: |
-          cat << 'EOF' >> android/app/build.gradle
-
-          dependencies {
-              implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.8.22"))
-          }
-          EOF
-
-      - name: Build Debug APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: FESCO-Bills-Manager-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+export default defineConfig({
+  base: './',
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '.'),
+    },
+  },
+});
