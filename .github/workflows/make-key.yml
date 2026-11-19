@@ -1,0 +1,27 @@
+name: Generate Permanent Keystore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Create Keystore & Base64
+        run: |
+          keytool -genkeypair -v -keystore fesco-release.keystore -alias fesco -keyalg RSA -keysize 2048 -validity 10000 -storepass Zahid@1234 -keypass Zahid@1234 -dname "CN=Zahid Nawaz, OU=Shop, O=Zahid Mobiles and Photo State, L=Sillanwali, S=Punjab, C=PK"
+          base64 -w 0 fesco-release.keystore > signing-key-base64.txt
+
+      - name: Download Keystore Files
+        uses: actions/upload-artifact@v4
+        with:
+          name: FESCO-Permanent-Keystore
+          path: |
+            fesco-release.keystore
+            signing-key-base64.txt
