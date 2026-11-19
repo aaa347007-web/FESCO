@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { formatCurrency, formatDateShort } from './format';
+import { formatCurrency, formatDateShort, saveToAndroidDownloads } from './format';
 
 function buildPdfDoc(opts) {
   const { title, periodLabel, bills = [], settings = {} } = opts;
@@ -62,43 +62,28 @@ function buildPdfDoc(opts) {
   return doc;
 }
 
-async function saveAndOpenNativePdf(doc, filename, openShare) {
+async function handleNativePdf(doc, filename, openShare) {
   const dataUri = doc.output('datauristring');
   const base64Data = dataUri.split(',')[1];
 
-  try {
-    await Filesystem.requestPermissions();
-  } catch {
-    // Ignore on Android 11+
-  }
+  const savedToDownloads = await saveToAndroidDownloads(filename, base64Data, 'application/pdf');
 
-  let saved;
-  try {
-    saved = await Filesystem.writeFile({
-      path: `Download/${filename}`,
-      data: base64Data,
-      directory: Directory.ExternalStorage,
-      recursive: true,
-    });
-  } catch {
-    saved = await Filesystem.writeFile({
-      path: filename,
-      data: base64Data,
-      directory: Directory.Documents,
-      recursive: true,
-    });
-  }
+  const cached = await Filesystem.writeFile({
+    path: filename,
+    data: base64Data,
+    directory: Directory.Cache,
+  });
 
-  if (openShare) {
+  if (openShare || !savedToDownloads) {
     try {
       await Share.share({
         title: filename,
         text: 'FESCO Bill Manager Report',
-        url: saved.uri,
-        dialogTitle: 'Share PDF Report',
+        url: cached.uri,
+        dialogTitle: 'Share or Save PDF Report',
       });
     } catch {
-      // User dismissed share popup
+      // Share sheet closed
     }
   }
 }
@@ -108,7 +93,7 @@ export async function downloadReportPdf(opts) {
   const filename = opts.filename || 'FESCO-Report.pdf';
 
   if (Capacitor.isNativePlatform()) {
-    await saveAndOpenNativePdf(doc, filename, false);
+    await handleNativePdf(doc, filename, false);
     return;
   }
 
@@ -120,7 +105,7 @@ export async function shareReportPdf(opts) {
   const filename = opts.filename || 'FESCO-Report.pdf';
 
   if (Capacitor.isNativePlatform()) {
-    await saveAndOpenNativePdf(doc, filename, true);
+    await handleNativePdf(doc, filename, true);
     return 'shared';
   }
 
