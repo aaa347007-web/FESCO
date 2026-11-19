@@ -62,23 +62,40 @@ export async function downloadJsonFile(payload, filename = 'fesco-backup.json') 
   const jsonText = JSON.stringify(payload, null, 2);
 
   if (Capacitor.isNativePlatform()) {
-    const saved = await Filesystem.writeFile({
-      path: filename,
-      data: jsonText,
-      directory: Directory.Documents,
-      encoding: Encoding.UTF8,
-      recursive: true,
-    });
+    try {
+      await Filesystem.requestPermissions();
+    } catch {
+      // Ignore on Android 11+
+    }
+
+    let saved;
+    try {
+      saved = await Filesystem.writeFile({
+        path: `Download/${filename}`,
+        data: jsonText,
+        directory: Directory.ExternalStorage,
+        encoding: Encoding.UTF8,
+        recursive: true,
+      });
+    } catch {
+      saved = await Filesystem.writeFile({
+        path: filename,
+        data: jsonText,
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8,
+        recursive: true,
+      });
+    }
 
     try {
       await Share.share({
         title: filename,
-        text: `FESCO JSON Backup saved in Documents/${filename}`,
+        text: `Saved in Download/${filename}`,
         url: saved.uri,
-        dialogTitle: 'Save or Share JSON Backup',
+        dialogTitle: 'Share JSON Backup (Already Saved in Download)',
       });
     } catch {
-      // Share popup band karne par bhi file Documents folder mein save rahegi
+      // File already saved in Download folder
     }
     return;
   }
