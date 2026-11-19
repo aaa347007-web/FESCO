@@ -15,6 +15,7 @@ import { BillHistoryModal } from './components/BillHistoryModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { EditBillModal } from './components/EditBillModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { initAdMobAndShowBanner, showInterstitialAd } from './lib/admob';
 import { api } from './lib/api';
 import { formatCurrency } from './lib/format';
 import type { AppSettings, Bill, DashboardStats, MonthlySummary, PaymentStatus } from './types/bill';
@@ -86,6 +87,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    initAdMobAndShowBanner();
+  }, []);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 3500);
     return () => clearTimeout(timer);
@@ -117,6 +122,13 @@ export default function App() {
     await loadAll();
     setRefreshKey((k) => k + 1);
   }, [loadAll]);
+
+  const handleTabChange = async (tab: NavTab) => {
+    setActiveTab(tab);
+    if (tab === 'reports') {
+      await showInterstitialAd();
+    }
+  };
 
   const handleToggleStatus = async (bill: Bill, nextStatus: PaymentStatus) => {
     if (togglingId === bill.id) return;
@@ -187,7 +199,7 @@ export default function App() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => handleTabChange(item.id)}
                 className={`flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition whitespace-nowrap ${
                   active
                     ? 'bg-blue-700 text-white shadow-xs'
@@ -231,7 +243,7 @@ export default function App() {
             <PWAInstallButton variant="compact" />
             <button
               type="button"
-              onClick={() => setActiveTab('bills')}
+              onClick={() => handleTabChange('bills')}
               aria-label="Search all bills"
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
             >
@@ -261,7 +273,7 @@ export default function App() {
             <PWAInstallButton variant="compact" />
             <button
               type="button"
-              onClick={() => setActiveTab('add')}
+              onClick={() => handleTabChange('add')}
               className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-blue-700 px-4 text-sm font-bold text-white transition hover:bg-blue-800 whitespace-nowrap shrink-0"
             >
               <Plus className="h-4 w-4" />
@@ -271,7 +283,7 @@ export default function App() {
         </header>
 
         {/* Page Viewport */}
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 pb-24 sm:px-6 lg:py-6 lg:pb-10">
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 pb-36 sm:px-6 lg:py-6 lg:pb-16">
           {activeTab === 'dashboard' && (
             <DashboardView
               stats={stats}
@@ -279,7 +291,7 @@ export default function App() {
               currencyCode={currencyCode}
               shopName={settings.shop_name}
               togglingId={togglingId}
-              onNavigate={(tab) => setActiveTab(tab)}
+              onNavigate={(tab) => handleTabChange(tab)}
               onQuickRecordBill={(companyId, refNo) => {
                 setPrefillAdd({ company: companyId, refNo });
                 setActiveTab('add');
@@ -320,7 +332,7 @@ export default function App() {
               refreshKey={refreshKey}
               initialSearch={billsSearchSeed}
               togglingId={togglingId}
-              onAddClick={() => setActiveTab('add')}
+              onAddClick={() => handleTabChange('add')}
               onToggleStatus={handleToggleStatus}
               onEditBill={(bill) => setEditingBill(bill)}
               onDeleteBill={(bill) => setDeletingBill(bill)}
@@ -359,7 +371,7 @@ export default function App() {
                 setSettings(updated);
                 refreshData();
               }}
-              onOpenBackupTab={() => setActiveTab('reports')}
+              onOpenBackupTab={() => handleTabChange('reports')}
               onToast={showToast}
             />
           )}
@@ -379,7 +391,7 @@ export default function App() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => handleTabChange(item.id)}
                 className={`flex min-h-[44px] flex-col items-center justify-center gap-0.5 px-1 transition ${
                   active ? 'text-blue-700' : 'text-slate-500 hover:text-slate-800'
                 }`}
@@ -436,7 +448,7 @@ export default function App() {
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-20 right-4 z-50 flex max-w-sm items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold text-white shadow-lg lg:bottom-6 ${
+          className={`fixed bottom-32 right-4 z-50 flex max-w-sm items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold text-white shadow-lg lg:bottom-20 ${
             toast.tone === 'error' ? 'bg-red-600' : 'bg-slate-900'
           }`}
         >
