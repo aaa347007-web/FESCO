@@ -6,15 +6,19 @@ import {
   CheckCircle2,
   Clock,
   Coins,
+  Download,
+  ExternalLink,
   FileText,
   Plus,
   Search,
   TrendingUp,
   X,
+  Zap,
 } from 'lucide-react';
 import { BillCollection } from '../components/BillTable';
 import { api } from '../lib/api';
 import { formatCurrency, formatMonthLabel, getLocalMonthString } from '../lib/format';
+import { PAK_UTILITY_COMPANIES } from '../lib/pakCompanies';
 import type { Bill, DashboardStats, PaymentStatus } from '../types/bill';
 
 interface DashboardViewProps {
@@ -24,6 +28,7 @@ interface DashboardViewProps {
   shopName: string;
   togglingId: number | null;
   onNavigate: (tab: 'add' | 'bills' | 'months' | 'reports') => void;
+  onQuickRecordBill: (companyId: string, refNo: string) => void;
   onToggleStatus: (bill: Bill, nextStatus: PaymentStatus) => void;
   onEditBill: (bill: Bill) => void;
   onDeleteBill: (bill: Bill) => void;
@@ -37,14 +42,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   shopName,
   togglingId,
   onNavigate,
+  onQuickRecordBill,
   onToggleStatus,
   onEditBill,
   onDeleteBill,
   onViewHistory,
 }) => {
+  const [selectedCompanyId, setSelectedCompanyId] = useState('FESCO');
+  const [billRefInput, setBillRefInput] = useState('');
+  const [billCheckerError, setBillCheckerError] = useState<string | null>(null);
+  const [activeBillModal, setActiveBillModal] = useState<{
+    companyId: string;
+    companyName: string;
+    refNo: string;
+    url: string;
+  } | null>(null);
+
   const [quickSearch, setQuickSearch] = useState('');
   const [searchResults, setSearchResults] = useState<Bill[] | null>(null);
   const [searching, setSearching] = useState(false);
+
+  const selectedCompany =
+    PAK_UTILITY_COMPANIES.find((c) => c.id === selectedCompanyId) ?? PAK_UTILITY_COMPANIES[0];
 
   useEffect(() => {
     const trimmed = quickSearch.trim();
@@ -63,17 +82,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => clearTimeout(timer);
   }, [quickSearch, stats]);
 
+  const handleCheckOnlineBill = (e: React.FormEvent) => {
+    e.preventDefault();
+    setBillCheckerError(null);
+    const cleaned = billRefInput.trim().replace(/[\s-]+/g, '');
+    if (!cleaned || cleaned.length < 8) {
+      setBillCheckerError(`Please enter a valid ${selectedCompany.inputLabel}.`);
+      return;
+    }
+    const url = selectedCompany.getBillUrl(cleaned);
+    setActiveBillModal({
+      companyId: selectedCompany.id,
+      companyName: selectedCompany.name,
+      refNo: cleaned,
+      url,
+    });
+  };
+
   const currentMonthLabel = formatMonthLabel(getLocalMonthString());
 
   if (loading && !stats) {
     return (
       <div className="space-y-6">
+        <div className="h-56 animate-pulse rounded-2xl border border-slate-200 bg-white" />
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
           {Array.from({ length: 8 }).map((_, idx) => (
             <div key={idx} className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-white" />
           ))}
         </div>
-        <div className="h-64 animate-pulse rounded-2xl border border-slate-200 bg-white" />
       </div>
     );
   }
@@ -94,39 +130,115 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
-      <section className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-xs font-semibold text-blue-700">
-            {shopName} · {currentMonthLabel}
+      {/* Top Section: All Pakistan Instant Online Bill Checker & PDF Downloader */}
+      <section className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-700 via-blue-800 to-slate-900 p-5 text-white shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold tracking-wide text-blue-100">
+              <Zap className="h-3.5 w-3.5 text-amber-300" />
+              <span>ALL PAKISTAN ONLINE BILL CHECKER</span>
+            </span>
+            <h2 className="mt-2 text-xl font-extrabold tracking-tight sm:text-2xl">
+              Check & Download Official Duplicate Bill
+            </h2>
+            <p className="mt-0.5 text-xs text-blue-100">
+              Electricity (FESCO, LESCO, MEPCO, GEPCO, IESCO, PESCO, KE), Gas (SNGPL, SSGC) & PTCL
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onNavigate('reports')}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-white/15 px-3.5 text-xs font-bold text-white transition hover:bg-white/25 whitespace-nowrap"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              <span>Reports</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('add')}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-amber-400 px-3.5 text-xs font-extrabold text-slate-950 shadow-sm transition hover:bg-amber-300 whitespace-nowrap"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Record</span>
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleCheckOnlineBill} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-12">
+          <div className="sm:col-span-5">
+            <label htmlFor="company-select" className="mb-1 block text-xs font-semibold text-blue-100">
+              Select Utility Company
+            </label>
+            <select
+              id="company-select"
+              value={selectedCompanyId}
+              onChange={(e) => {
+                setSelectedCompanyId(e.target.value);
+                setBillCheckerError(null);
+              }}
+              className="min-h-[46px] w-full rounded-xl border border-white/20 bg-white px-3.5 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-amber-400"
+            >
+              <optgroup label="Electricity (WAPDA & K-Electric)">
+                {PAK_UTILITY_COMPANIES.filter((c) => c.category === 'Electricity').map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Gas Companies">
+                {PAK_UTILITY_COMPANIES.filter((c) => c.category === 'Gas').map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Internet & Landline">
+                {PAK_UTILITY_COMPANIES.filter((c) => c.category === 'Internet / Landline').map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+
+          <div className="sm:col-span-4">
+            <label htmlFor="online-ref-input" className="mb-1 block text-xs font-semibold text-blue-100">
+              {selectedCompany.inputLabel}
+            </label>
+            <input
+              id="online-ref-input"
+              type="text"
+              inputMode="numeric"
+              value={billRefInput}
+              onChange={(e) => setBillRefInput(e.target.value)}
+              placeholder={selectedCompany.placeholder}
+              className="min-h-[46px] w-full rounded-xl border border-white/20 bg-white px-3.5 font-mono text-sm font-bold text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-amber-400"
+            />
+          </div>
+
+          <div className="flex items-end sm:col-span-3">
+            <button
+              type="submit"
+              className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 text-sm font-extrabold text-white shadow-md transition hover:bg-emerald-400 active:scale-[0.99]"
+            >
+              <Search className="h-4 w-4" />
+              <span>Check Bill</span>
+            </button>
+          </div>
+        </form>
+
+        {billCheckerError && (
+          <p className="mt-2.5 rounded-lg bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-100">
+            {billCheckerError}
           </p>
-          <h2 className="mt-1 text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">
-            Daily Counter & Commission Overview
-          </h2>
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => onNavigate('reports')}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 whitespace-nowrap"
-          >
-            <FileText className="h-4 w-4 text-blue-700" />
-            <span>PDF Reports</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('add')}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-blue-700 px-5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-800 active:scale-[0.99] whitespace-nowrap"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add New Bill</span>
-          </button>
-        </div>
+        )}
       </section>
 
       {/* 8 Summary Cards */}
       <section aria-label="Dashboard Summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-        {/* 1. Total Commission Earned (Primary Focal Card) */}
         <div className="col-span-2 rounded-2xl bg-blue-700 p-5 text-white sm:col-span-1">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-blue-100">Total Commission Earned</span>
@@ -140,7 +252,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        {/* 2. Total Bills */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Total Bills</span>
@@ -152,7 +263,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="mt-1.5 text-xs text-slate-500">Next Serial #{s.nextSerialNumber}</p>
         </div>
 
-        {/* 3. Total Bill Amount */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Total Bill Amount</span>
@@ -161,10 +271,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="mt-2 font-mono text-xl font-extrabold text-slate-900 tabular-nums sm:text-2xl">
             {formatCurrency(s.totalBillAmount, currencyCode)}
           </div>
-          <p className="mt-1.5 text-xs text-slate-500">All recorded bills</p>
+          <p className="mt-1.5 text-xs text-slate-500">{shopName}</p>
         </div>
 
-        {/* 4. Current Month Commission */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Current Month Commission</span>
@@ -176,7 +285,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="mt-1.5 text-xs text-slate-500">{currentMonthLabel}</p>
         </div>
 
-        {/* 5. Paid Bills */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Paid Bills</span>
@@ -188,7 +296,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="mt-1.5 text-xs text-slate-500">Collected & verified</p>
         </div>
 
-        {/* 6. Unpaid Bills */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Unpaid Bills</span>
@@ -200,7 +307,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="mt-1.5 text-xs text-slate-500">Awaiting payment</p>
         </div>
 
-        {/* 7. Today's Bills */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Today&apos;s Bills</span>
@@ -212,7 +318,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="mt-1.5 text-xs text-slate-500">Added today</p>
         </div>
 
-        {/* 8. Today's Commission */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">Today&apos;s Commission</span>
@@ -225,15 +330,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
-      {/* Quick Search by Reference # or Serial # */}
+      {/* Quick Search in Saved Records */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="text-base font-bold text-slate-900">Quick Bill Lookup</h3>
-            <p className="text-xs text-slate-500">
-              Search across all months and years by FESCO Reference Number or Serial Number
-            </p>
-          </div>
+        <div>
+          <h3 className="text-base font-bold text-slate-900">Saved Records Lookup</h3>
+          <p className="text-xs text-slate-500">
+            Search your saved bills across all months by Reference Number or Serial Number
+          </p>
         </div>
         <div className="relative mt-3">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -241,7 +344,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             type="text"
             value={quickSearch}
             onChange={(e) => setQuickSearch(e.target.value)}
-            placeholder="Enter FESCO Reference Number or Bill Serial #..."
+            placeholder="Search saved Reference Number or Serial #..."
             className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/15"
           />
           {quickSearch && (
@@ -274,7 +377,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onDelete={onDeleteBill}
               onViewHistory={onViewHistory}
               emptyTitle="No matching bill found"
-              emptyDescription={`No record matched "${quickSearch}". Check the reference number or serial number.`}
+              emptyDescription={`No saved record matched "${quickSearch}".`}
             />
           </div>
         )}
@@ -308,7 +411,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           onDelete={onDeleteBill}
           onViewHistory={onViewHistory}
           emptyTitle="No bills added yet"
-          emptyDescription="Add your first FESCO electricity bill to start tracking payments, commissions, and monthly history."
+          emptyDescription="Add your first utility bill to start tracking payments, commissions, and monthly history."
           emptyAction={
             <button
               type="button"
@@ -321,6 +424,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           }
         />
       </section>
-    </div>
-  );
-};
+
+      {/* Official Bill Preview & PDF Download Modal */}
+      {activeBillModal && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 backdrop-blur-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-extrabold text-slate-900">
+                {activeBillModal.companyName} — Ref: {activeBillModal.refNo}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Official Duplicate Bill · Tap Download / Print PDF or Save Record
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <a
+                href={activeBillModal.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-bold text-white hover:bg-emerald-700"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Download / Print PDF</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const { companyId, refNo } = activeBillModal;
+                  setActiveBillModal(null);
+                  onQuickRecordBill(companyId, refNo);
+                }}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-blue-700 px-3.5 text-xs font-bold text-white hover:bg-blue-800"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add to My Records</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveBillModal(null)}
+                aria-label="Close bill viewer"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 bg-white">
+            <iframe
+              src={activeBillModal.url}
+              title="Official Utility Bill"
+           
