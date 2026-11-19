@@ -24,6 +24,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      - name: Cache Gradle & Maven Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/package-lock.json', '**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Install dependencies & Capacitor
         run: |
           npm install --legacy-peer-deps
@@ -46,6 +56,9 @@ jobs:
         run: |
           echo "$SIGNING_KEY" | base64 -d > android/app/fesco-release.keystore
 
+          # Use Google's fast Maven Central mirror first to avoid repo.maven.apache.org 429 rate limits
+          sed -i 's|mavenCentral()|maven { url "https://maven-central.storage-download.googleapis.com/maven2/" }\n        mavenCentral()|g' android/build.gradle android/settings.gradle 2>/dev/null || true
+
           # Remove old default PNG launcher icons so custom vector adaptive icon is used everywhere
           find android/app/src/main/res -name "ic_launcher*.png" -delete
           find android/app/src/main/res -name "ic_launcher*.webp" -delete
@@ -66,15 +79,12 @@ jobs:
               android:height="108dp"
               android:viewportWidth="108"
               android:viewportHeight="108">
-              <!-- Subtle Inner Glow Ring -->
               <path
                   android:fillColor="#2563EB"
                   android:pathData="M54,22A32,32 0 1,1 54,86A32,32 0 1,1 54,22Z" />
-              <!-- White Bill Receipt Card -->
               <path
                   android:fillColor="#FFFFFF"
                   android:pathData="M36,30h36c2.2,0 4,1.8 4,4v40c0,2.2 -1.8,4 -4,4H36c-2.2,0 -4,-1.8 -4,-4V34C32,31.8 33.8,30 36,30z" />
-              <!-- Golden-Yellow Lightning Bolt -->
               <path
                   android:fillColor="#F59E0B"
                   android:pathData="M57,36L43,56h10l-2,16l14,-20H55L57,36z" />
@@ -249,7 +259,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
 
       - name: Upload Signed APK Artifact
         uses: actions/upload-artifact@v4
