@@ -467,3 +467,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 type="button"
                 onClick={() => setActiveBillModal(null)}
                 aria-label="Close bill viewer"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 bg-white">
+            <iframe
+              src={activeBillModal.url}
+              title="Official Utility Bill"
+              className="h-full w-full border-0"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
