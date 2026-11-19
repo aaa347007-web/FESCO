@@ -61,17 +61,16 @@ jobs:
 
           # Crop studio margin & generate sharp PNG launcher icons for all Android densities
           if [ -f "app-icon.png" ]; then
+            sudo apt-get update && sudo apt-get install -y python3-pil
             python3 -c '
           from PIL import Image
           import os
 
           img = Image.open("app-icon.png").convert("RGBA")
           w, h = img.size
-          # Crop outer studio background so the rounded square fills the icon cleanly
           margin = int(min(w, h) * 0.13)
           cropped = img.crop((margin, margin, w - margin, h - margin))
 
-          # Adaptive foreground with safe padding
           fg_size = 432
           inner_size = int(fg_size * 0.72)
           fg = Image.new("RGBA", (fg_size, fg_size), (0, 0, 0, 0))
