@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies & Capacitor
         run: |
           npm install --legacy-peer-deps
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @capacitor/assets --legacy-peer-deps
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @capacitor/browser @capacitor/assets --legacy-peer-deps
 
       - name: Build Web App
         run: npm run build
@@ -60,16 +60,13 @@ jobs:
           cropped = img.crop((margin, margin, w - margin, h - margin))
 
           os.makedirs("assets", exist_ok=True)
-          # Full square icon (1024x1024)
           cropped.resize((1024, 1024), Image.LANCZOS).save("assets/icon-only.png", "PNG")
 
-          # Adaptive foreground with safe zoom so nothing gets clipped
           fg = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
           inner = cropped.resize((720, 720), Image.LANCZOS)
           fg.paste(inner, (152, 152), inner)
           fg.save("assets/icon-foreground.png", "PNG")
 
-          # Matching dark emerald background
           bg = Image.new("RGBA", (1024, 1024), (15, 76, 58, 255))
           bg.save("assets/icon-background.png", "PNG")
           '
@@ -250,3 +247,4 @@ jobs:
         with:
           name: FESCO-Bills-Manager-Signed-APK
           path: android/app/build/outputs/apk/release/app-release.apk
+          
