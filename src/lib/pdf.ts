@@ -66,22 +66,40 @@ async function saveAndOpenNativePdf(doc, filename, openShare) {
   const dataUri = doc.output('datauristring');
   const base64Data = dataUri.split(',')[1];
 
-  const saved = await Filesystem.writeFile({
-    path: filename,
-    data: base64Data,
-    directory: Directory.Documents,
-    recursive: true,
-  });
-
   try {
-    await Share.share({
-      title: filename,
-      text: openShare ? 'FESCO Bill Manager Report' : `Saved in Documents/${filename}`,
-      url: saved.uri,
-      dialogTitle: openShare ? 'Share PDF Report' : 'Open or Save PDF',
+    await Filesystem.requestPermissions();
+  } catch {
+    // Ignore on Android 11+
+  }
+
+  let saved;
+  try {
+    saved = await Filesystem.writeFile({
+      path: `Download/${filename}`,
+      data: base64Data,
+      directory: Directory.ExternalStorage,
+      recursive: true,
     });
   } catch {
-    // Share sheet dismissed; file remains saved in Documents
+    saved = await Filesystem.writeFile({
+      path: filename,
+      data: base64Data,
+      directory: Directory.Documents,
+      recursive: true,
+    });
+  }
+
+  if (openShare) {
+    try {
+      await Share.share({
+        title: filename,
+        text: 'FESCO Bill Manager Report',
+        url: saved.uri,
+        dialogTitle: 'Share PDF Report',
+      });
+    } catch {
+      // User dismissed share popup
+    }
   }
 }
 
