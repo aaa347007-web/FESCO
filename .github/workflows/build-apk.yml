@@ -37,7 +37,7 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Add Native MediaStore Download Plugin & Configure Signing
+      - name: Add Native Plugins (Downloads + Offline OCR) & Configure Signing
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -109,6 +109,54 @@ jobs:
           }
           EOF
 
+          cat << EOF > "$PKG_DIR/BillOcrPlugin.java"
+          package ${PKG_NAME};
+
+          import android.graphics.Bitmap;
+          import android.graphics.BitmapFactory;
+          import android.util.Base64;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import com.google.mlkit.vision.common.InputImage;
+          import com.google.mlkit.vision.text.TextRecognition;
+          import com.google.mlkit.vision.text.TextRecognizer;
+          import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+
+          @CapacitorPlugin(name = "BillOcr")
+          public class BillOcrPlugin extends Plugin {
+              @PluginMethod
+              public void scanImage(PluginCall call) {
+                  String base64Data = call.getString("base64Data");
+                  if (base64Data == null || base64Data.isEmpty()) {
+                      call.reject("Missing image data");
+                      return;
+                  }
+                  try {
+                      byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
+                      Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                      if (bitmap == null) {
+                          call.reject("Invalid image");
+                          return;
+                      }
+                      InputImage image = InputImage.fromBitmap(bitmap, 0);
+                      TextRecognizer recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+                      recognizer.process(image)
+                          .addOnSuccessListener(visionText -> {
+                              JSObject ret = new JSObject();
+                              ret.put("text", visionText.getText());
+                              call.resolve(ret);
+                          })
+                          .addOnFailureListener(e -> call.reject(e.getMessage()));
+                  } catch (Exception e) {
+                      call.reject(e.getMessage());
+                  }
+              }
+          }
+          EOF
+
           cat << EOF > "$PKG_DIR/MainActivity.java"
           package ${PKG_NAME};
 
@@ -119,6 +167,7 @@ jobs:
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   registerPlugin(PublicDownloadPlugin.class);
+                  registerPlugin(BillOcrPlugin.class);
                   super.onCreate(savedInstanceState);
               }
           }
@@ -146,6 +195,7 @@ jobs:
 
           dependencies {
               implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.8.22"))
+              implementation("com.google.mlkit:text-recognition:16.0.1")
           }
           EOF
 
