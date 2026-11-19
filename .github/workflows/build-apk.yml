@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Signed Android APK
 
 on:
   push:
@@ -37,9 +37,11 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Add Storage Permissions & Fix Kotlin
+      - name: Configure Storage, Version & Kotlin Fix
         run: |
           sed -i 's/<application/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" \/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" \/>\n    <application/' android/app/src/main/AndroidManifest.xml
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/g" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/g" android/app/build.gradle
           cat << 'EOF' >> android/app/build.gradle
 
           dependencies {
@@ -47,14 +49,24 @@ jobs:
           }
           EOF
 
-      - name: Build Debug APK
+      - name: Build Release APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
 
-      - name: Upload APK Artifact
+      - name: Sign Release APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: android/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload Signed APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FESCO-Bills-Manager-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: FESCO-Bills-Manager-Signed-APK
+          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
