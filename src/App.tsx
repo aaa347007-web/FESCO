@@ -68,6 +68,10 @@ export default function App() {
 
   const [globalSearch, setGlobalSearch] = useState('');
   const [billsSearchSeed, setBillsSearchSeed] = useState('');
+  const [prefillAdd, setPrefillAdd] = useState<{ company: string; refNo: string }>({
+    company: 'FESCO',
+    refNo: '',
+  });
 
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
@@ -276,9 +280,10 @@ export default function App() {
               shopName={settings.shop_name}
               togglingId={togglingId}
               onNavigate={(tab) => setActiveTab(tab)}
-              onQuickRecordBill={(_companyId, refNo) => {
+              onQuickRecordBill={(companyId, refNo) => {
+                setPrefillAdd({ company: companyId, refNo });
                 setActiveTab('add');
-                showToast(`Enter Bill Amount & Commission for Reference # ${refNo}`);
+                showToast(`Selected ${companyId} (${refNo}) — Enter Bill Amount & Save.`);
               }}
               onToggleStatus={handleToggleStatus}
               onEditBill={(bill) => setEditingBill(bill)}
@@ -292,9 +297,12 @@ export default function App() {
               suggestedSerial={stats?.nextSerialNumber ?? 1}
               defaultCommission={settings.default_commission}
               currencyCode={currencyCode}
+              prefillCompany={prefillAdd.company}
+              prefillReference={prefillAdd.refNo}
               recentBills={stats?.recentBills ?? []}
               togglingId={togglingId}
               onBillCreated={async (bill) => {
+                setPrefillAdd({ company: 'FESCO', refNo: '' });
                 await refreshData();
                 showToast(`Added Bill #${bill.serial_number} (${bill.reference_number}).`);
               }}
