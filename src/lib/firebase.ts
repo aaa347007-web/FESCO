@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD0gK_jzW_NZ4hz00LpKXNFRxiJyYdlwng",
+  apiKey: "AIzaSyD0gK_jzW_NZ4hz00LpKXNfRxiJyYdlwmg",
   authDomain: "pak-bill-manager.firebaseapp.com",
   projectId: "pak-bill-manager",
   storageBucket: "pak-bill-manager.firebasestorage.app",
