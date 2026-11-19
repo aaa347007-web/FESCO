@@ -43,7 +43,7 @@ const NAV_ITEMS: {
 
 const DEFAULT_SETTINGS: AppSettings = {
   id: 1,
-  shop_name: 'FESCO Bill Manager',
+  shop_name: 'Pak Bill Manager',
   owner_name: 'Shop Counter',
   currency_code: 'PKR',
   default_commission: 30,
@@ -169,7 +169,7 @@ export default function App() {
           </div>
           <div className="min-w-0">
             <div className="truncate text-sm font-extrabold tracking-tight text-slate-900">
-              FESCO Bill Manager
+              Pak Bill Manager
             </div>
             <div className="truncate text-xs text-slate-500">{settings.shop_name}</div>
           </div>
@@ -212,14 +212,14 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex min-h-screen flex-col lg:pl-64">
-        {/* Mobile Top Bar (Compact <=56px) */}
+        {/* Mobile Top Bar */}
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur-md lg:hidden">
           <div className="flex min-w-0 items-center gap-2">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-700 text-white">
               <Zap className="h-4 w-4" />
             </div>
             <span className="truncate text-base font-extrabold tracking-tight text-slate-900">
-              FESCO Bill Manager
+              Pak Bill Manager
             </span>
           </div>
 
@@ -236,7 +236,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Desktop Top Bar (3-zone contract) */}
+        {/* Desktop Top Bar */}
         <header className="sticky top-0 z-20 hidden h-16 items-center justify-between gap-8 border-b border-slate-200 bg-white/95 px-6 backdrop-blur-md lg:flex">
           <h1 className="text-lg font-extrabold tracking-tight text-slate-900 whitespace-nowrap shrink-0">
             {activeItem.label}
@@ -276,6 +276,10 @@ export default function App() {
               shopName={settings.shop_name}
               togglingId={togglingId}
               onNavigate={(tab) => setActiveTab(tab)}
+              onQuickRecordBill={(_companyId, refNo) => {
+                setActiveTab('add');
+                showToast(`Enter Bill Amount & Commission for Reference # ${refNo}`);
+              }}
               onToggleStatus={handleToggleStatus}
               onEditBill={(bill) => setEditingBill(bill)}
               onDeleteBill={(bill) => setDeletingBill(bill)}
@@ -354,7 +358,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* Mobile Fixed Bottom Navigation Bar (6 tabs, compact 64px height) */}
+      {/* Mobile Fixed Bottom Navigation Bar */}
       <nav
         aria-label="Mobile bottom navigation"
         className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md pb-safe lg:hidden"
@@ -434,4 +438,5 @@ export default function App() {
       )}
     </div>
   );
-}
+            }
+            
