@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   ArrowRight,
   Banknote,
@@ -20,6 +21,12 @@ import { api } from '../lib/api';
 import { formatCurrency, formatMonthLabel, getLocalMonthString } from '../lib/format';
 import { PAK_UTILITY_COMPANIES } from '../lib/pakCompanies';
 import type { Bill, DashboardStats, PaymentStatus } from '../types/bill';
+
+interface NativeBrowserPlugin {
+  open(options: { url: string; toolbarColor?: string }): Promise<void>;
+}
+
+const Browser = registerPlugin<NativeBrowserPlugin>('Browser');
 
 interface DashboardViewProps {
   stats: DashboardStats | null;
@@ -51,7 +58,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [selectedCompanyId, setSelectedCompanyId] = useState('FESCO');
   const [billRefInput, setBillRefInput] = useState('');
   const [billCheckerError, setBillCheckerError] = useState<string | null>(null);
-  const [activeBillModal, setActiveBillModal] = useState<{
+  const [lastCheckedBill, setLastCheckedBill] = useState<{
     companyId: string;
     companyName: string;
     refNo: string;
@@ -82,7 +89,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => clearTimeout(timer);
   }, [quickSearch, stats]);
 
-  const handleCheckOnlineBill = (e: React.FormEvent) => {
+  const openOfficialBill = async (url: string) => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await Browser.open({ url, toolbarColor: '#1d4ed8' });
+        return;
+      } catch {
+        // Fallback below
+      }
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleCheckOnlineBill = async (e: React.FormEvent) => {
     e.preventDefault();
     setBillCheckerError(null);
     const cleaned = billRefInput.trim().replace(/[\s-]+/g, '');
@@ -91,12 +110,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return;
     }
     const url = selectedCompany.getBillUrl(cleaned);
-    setActiveBillModal({
+    setLastCheckedBill({
       companyId: selectedCompany.id,
       companyName: selectedCompany.name,
       refNo: cleaned,
       url,
     });
+    await openOfficialBill(url);
   };
 
   const currentMonthLabel = formatMonthLabel(getLocalMonthString());
@@ -234,6 +254,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="mt-2.5 rounded-lg bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-100">
             {billCheckerError}
           </p>
+        )}
+
+        {/* Quick Action Bar after checking a bill */}
+        {lastCheckedBill && (
+          <div className="mt-4 flex flex-col justify-between gap-3 rounded-xl border border-white/15 bg-white/10 p-3.5 sm:flex-row sm:items-center">
+            <div className="text-xs">
+              <div className="font-bold text-white">
+                Last Checked: {lastCheckedBill.companyName} ({lastCheckedBill.refNo})
+              </div>
+              <div className="mt-0.5 text-blue-100">
+                Inside the opened bill page, tap 3-dots (⋮) → Share / Print → Save as PDF
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openOfficialBill(lastCheckedBill.url)}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-white px-3 text-xs font-bold text-blue-900 hover:bg-blue-50"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Open / Print PDF</span>
+                <ExternalLink className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onQuickRecordBill(lastCheckedBill.companyId, lastCheckedBill.refNo)}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-amber-400 px-3 text-xs font-extrabold text-slate-950 hover:bg-amber-300"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add to My Records</span>
+              </button>
+            </div>
+          </div>
         )}
       </section>
 
@@ -424,65 +477,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           }
         />
       </section>
-
-      {/* Official Bill Preview & PDF Download Modal */}
-      {activeBillModal && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 backdrop-blur-xs">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-extrabold text-slate-900">
-                {activeBillModal.companyName} — Ref: {activeBillModal.refNo}
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Official Duplicate Bill · Tap Download / Print PDF or Save Record
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <a
-                href={activeBillModal.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-bold text-white hover:bg-emerald-700"
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span>Download / Print PDF</span>
-                <ExternalLink className="h-3 w-3" />
-              </a>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const { companyId, refNo } = activeBillModal;
-                  setActiveBillModal(null);
-                  onQuickRecordBill(companyId, refNo);
-                }}
-                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl bg-blue-700 px-3.5 text-xs font-bold text-white hover:bg-blue-800"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Add to My Records</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveBillModal(null)}
-                aria-label="Close bill viewer"
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 bg-white">
-            <iframe
-              src={activeBillModal.url}
-              title="Official Utility Bill"
-              className="h-full w-full border-0"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 };
