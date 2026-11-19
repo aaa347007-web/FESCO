@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CalendarDays,
   CheckCircle2,
+  Cloud,
   DatabaseBackup,
   FileSpreadsheet,
   LayoutDashboard,
@@ -12,11 +13,20 @@ import {
   Zap,
 } from 'lucide-react';
 import { BillHistoryModal } from './components/BillHistoryModal';
+import { CloudSyncModal } from './components/CloudSyncModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { EditBillModal } from './components/EditBillModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { initAdMobAndShowBanner, showInterstitialAd } from './lib/admob';
 import { api } from './lib/api';
+import {
+  emailToPhone,
+  loadCloudBackup,
+  onAuthStateChanged,
+  saveCloudBackup,
+  type User,
+  auth,
+} from './lib/firebase';
 import { formatCurrency } from './lib/format';
 import type { AppSettings, Bill, DashboardStats, MonthlySummary, PaymentStatus } from './types/bill';
 import { AddBillView } from './views/AddBillView';
@@ -80,6 +90,13 @@ export default function App() {
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [historyBillId, setHistoryBillId] = useState<number | null>(null);
 
+  // Cloud Auth & Sync States
+  const [cloudUser, setCloudUser] = useState<User | null>(null);
+  const [cloudModalOpen, setCloudModalOpen] = useState(false);
+  const [cloudSyncing, setCloudSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const isRestoringRef = useRef(false);
+
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const showToast = useCallback((message: string, tone: 'success' | 'error' = 'success') => {
@@ -118,10 +135,71 @@ export default function App() {
     loadAll();
   }, [loadAll]);
 
+  // Upload local backup to Firebase Cloud
+  const syncNowToCloud = useCallback(async (targetUser?: User | null) => {
+    const activeUser = targetUser ?? auth.currentUser;
+    if (!activeUser || isRestoringRef.current) return;
+    setCloudSyncing(true);
+    try {
+      const backupPayload = await api.exportBackup('all');
+      await saveCloudBackup(activeUser.uid, backupPayload as Record<string, unknown>);
+      setLastSyncedAt(
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      );
+    } catch {
+      // Offline mode: local storage remains intact
+    } finally {
+      setCloudSyncing(false);
+    }
+  }, []);
+
+  // Listen to Firebase Auth state changes
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setCloudUser(u);
+      if (u) {
+        try {
+          isRestoringRef.current = true;
+          const cloudData = await loadCloudBackup(u.uid);
+          if (cloudData && Array.isArray(cloudData.bills)) {
+            await api.restoreBackup(cloudData as Parameters<typeof api.restoreBackup>[0], 'merge');
+            await loadAll();
+            setRefreshKey((k) => k + 1);
+          }
+        } catch {
+          // Ignore offline error
+        } finally {
+          isRestoringRef.current = false;
+        }
+        await syncNowToCloud(u);
+      }
+    });
+    return () => unsub();
+  }, [loadAll, syncNowToCloud]);
+
   const refreshData = useCallback(async () => {
     await loadAll();
     setRefreshKey((k) => k + 1);
-  }, [loadAll]);
+    await syncNowToCloud();
+  }, [loadAll, syncNowToCloud]);
+
+  const handleCloudAuthSuccess = async (loggedInUser: User, isNewAccount: boolean) => {
+    setCloudUser(loggedInUser);
+    isRestoringRef.current = true;
+    try {
+      if (!isNewAccount) {
+        const cloudData = await loadCloudBackup(loggedInUser.uid);
+        if (cloudData && Array.isArray(cloudData.bills)) {
+          await api.restoreBackup(cloudData as Parameters<typeof api.restoreBackup>[0], 'merge');
+          await loadAll();
+          setRefreshKey((k) => k + 1);
+        }
+      }
+    } finally {
+      isRestoringRef.current = false;
+    }
+    await syncNowToCloud(loggedInUser);
+  };
 
   const handleTabChange = async (tab: NavTab) => {
     setActiveTab(tab);
@@ -213,7 +291,27 @@ export default function App() {
           })}
         </nav>
 
-        <div className="border-t border-slate-200 p-4">
+        <div className="space-y-3 border-t border-slate-200 p-4">
+          <button
+            type="button"
+            onClick={() => setCloudModalOpen(true)}
+            className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left text-xs font-bold transition ${
+              cloudUser
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                : 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100'
+            }`}
+          >
+            <div className="flex items-center gap-2 truncate">
+              <Cloud className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                {cloudUser ? emailToPhone(cloudUser.email) : 'Cloud Backup Off'}
+              </span>
+            </div>
+            <span className="shrink-0 text-[10px] underline">
+              {cloudUser ? 'Synced' : 'Login'}
+            </span>
+          </button>
+
           <div className="rounded-xl bg-blue-50 p-3.5">
             <div className="text-xs font-medium text-blue-800">Earned Commission</div>
             <div className="mt-1 font-mono text-lg font-extrabold text-blue-900 tabular-nums">
@@ -229,23 +327,37 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex min-h-screen flex-col lg:pl-64">
         {/* Mobile Top Bar */}
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur-md lg:hidden">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3.5 backdrop-blur-md lg:hidden">
           <div className="flex min-w-0 items-center gap-2">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-700 text-white">
               <Zap className="h-4 w-4" />
             </div>
-            <span className="truncate text-base font-extrabold tracking-tight text-slate-900">
+            <span className="truncate text-sm font-extrabold tracking-tight text-slate-900">
               Pak Bill Manager
             </span>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCloudModalOpen(true)}
+              className={`flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-extrabold transition ${
+                cloudUser
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-amber-200 bg-amber-50 text-amber-800'
+              }`}
+            >
+              <Cloud className={`h-3.5 w-3.5 ${cloudSyncing ? 'animate-pulse' : ''}`} />
+              <span>{cloudUser ? 'Synced' : 'Cloud'}</span>
+            </button>
+
             <PWAInstallButton variant="compact" />
+
             <button
               type="button"
               onClick={() => handleTabChange('bills')}
               aria-label="Search all bills"
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
             >
               <Search className="h-4 w-4" />
             </button>
@@ -253,7 +365,7 @@ export default function App() {
         </header>
 
         {/* Desktop Top Bar */}
-        <header className="sticky top-0 z-20 hidden h-16 items-center justify-between gap-8 border-b border-slate-200 bg-white/95 px-6 backdrop-blur-md lg:flex">
+        <header className="sticky top-0 z-20 hidden h-16 items-center justify-between gap-6 border-b border-slate-200 bg-white/95 px-6 backdrop-blur-md lg:flex">
           <h1 className="text-lg font-extrabold tracking-tight text-slate-900 whitespace-nowrap shrink-0">
             {activeItem.label}
           </h1>
@@ -269,8 +381,22 @@ export default function App() {
             />
           </form>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setCloudModalOpen(true)}
+              className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-xs font-extrabold transition ${
+                cloudUser
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+              }`}
+            >
+              <Cloud className={`h-4 w-4 ${cloudSyncing ? 'animate-pulse' : ''}`} />
+              <span>{cloudUser ? `Synced (${emailToPhone(cloudUser.email)})` : 'Cloud Login'}</span>
+            </button>
+
             <PWAInstallButton variant="compact" />
+
             <button
               type="button"
               onClick={() => handleTabChange('add')}
@@ -405,6 +531,19 @@ export default function App() {
           })}
         </div>
       </nav>
+
+      {/* Cloud Sync & Mobile PIN Login Modal */}
+      <CloudSyncModal
+        open={cloudModalOpen}
+        user={cloudUser}
+        syncing={cloudSyncing}
+        lastSyncedAt={lastSyncedAt}
+        defaultShopName={settings.shop_name}
+        onClose={() => setCloudModalOpen(false)}
+        onAuthSuccess={handleCloudAuthSuccess}
+        onManualSync={() => syncNowToCloud()}
+        onToast={showToast}
+      />
 
       {/* Modals */}
       <EditBillModal
