@@ -9,6 +9,8 @@ interface AddBillViewProps {
   suggestedSerial: number;
   defaultCommission: number;
   currencyCode: string;
+  prefillCompany?: string;
+  prefillReference?: string;
   recentBills: Bill[];
   togglingId: number | null;
   onBillCreated: (bill: Bill) => void;
@@ -22,6 +24,8 @@ export const AddBillView: React.FC<AddBillViewProps> = ({
   suggestedSerial,
   defaultCommission,
   currencyCode,
+  prefillCompany,
+  prefillReference,
   recentBills,
   togglingId,
   onBillCreated,
@@ -47,9 +51,9 @@ export const AddBillView: React.FC<AddBillViewProps> = ({
               <PlusCircle className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-lg font-extrabold text-slate-900">Add New FESCO Bill</h2>
+              <h2 className="text-lg font-extrabold text-slate-900">Add New Utility Bill</h2>
               <p className="text-xs text-slate-500">
-                Duplicate reference numbers are automatically blocked
+                Supports FESCO, LESCO, MEPCO, GEPCO, IESCO, PESCO, KE, SNGPL, SSGC & PTCL
               </p>
             </div>
           </div>
@@ -72,6 +76,8 @@ export const AddBillView: React.FC<AddBillViewProps> = ({
 
           <BillForm
             mode="create"
+            prefillCompany={prefillCompany}
+            prefillReference={prefillReference}
             suggestedSerial={suggestedSerial}
             defaultCommission={defaultCommission}
             currencyCode={currencyCode}
@@ -94,15 +100,15 @@ export const AddBillView: React.FC<AddBillViewProps> = ({
             <li className="flex items-start gap-2.5">
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-700" />
               <span>
-                <strong>Duplicate Protection:</strong> If a FESCO Reference Number already exists in
-                any month, the system prevents accidental duplicate entry.
+                <strong>All Pakistan Utilities:</strong> Choose Electricity, Gas, or PTCL and save
+                duplicate-free consumer records.
               </span>
             </li>
             <li className="flex items-start gap-2.5">
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-700" />
               <span>
-                <strong>Accurate Commission:</strong> Earned commission updates inside a database
-                transaction only when a bill is Paid, and reverses cleanly if changed back to Unpaid.
+                <strong>Accurate Commission:</strong> Earned commission updates only when a bill is
+                Paid, and reverses cleanly if changed back to Unpaid.
               </span>
             </li>
           </ul>
@@ -121,7 +127,7 @@ export const AddBillView: React.FC<AddBillViewProps> = ({
           onDelete={onDeleteBill}
           onViewHistory={onViewHistory}
           emptyTitle="No bills recorded yet"
-          emptyDescription="Fill out the form above to record your first FESCO electricity bill."
+          emptyDescription="Fill out the form above to record your first utility bill."
         />
       </section>
     </div>
