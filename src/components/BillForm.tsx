@@ -1,7 +1,97 @@
-import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Clock, Hash, RotateCcw, Save } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Camera, CheckCircle2, Clock, Hash, ImagePlus, Loader2, RotateCcw, Save, Sparkles } from 'lucide-react';
 import { api } from '../lib/api';
 import type { Bill, PaymentStatus } from '../types/bill';
+
+interface BillOcrPlugin {
+  scanImage(options: { base64Data: string }): Promise<{ text: string }>;
+}
+
+const BillOcr = registerPlugin<BillOcrPlugin>('BillOcr');
+
+function extractFescoBillData(rawText: string): { referenceNumber: string; billAmount: string } {
+  const text = rawText.replace(/\r/g, '\n');
+  let referenceNumber = '';
+  let billAmount = '';
+
+  // 1. Check FESCO barcode summary line: e.g. "NOV 26 - 01 13462 0074301 - 000000104 - 23 NOV 26"
+  const barcodeLineMatch = text.match(
+    /\b([0-9]{2}\s*[0-9]{5}\s*[0-9]{7})\s*[-–]\s*0*([1-9][0-9]{0,6})\s*[-–]\s*[0-9]{1,2}\s*[A-Z]{3}\s*[0-9]{2}/i
+  );
+
+  if (barcodeLineMatch) {
+    referenceNumber = barcodeLineMatch[1].replace(/\s+/g, '');
+    billAmount = barcodeLineMatch[2];
+  }
+
+  // 2. Fallback Reference Number: 14 digits (ignoring 03xx mobile numbers)
+  if (!referenceNumber) {
+    const refMatches = text.match(/\b([0-9]{2}\s*[0-9]{5}\s*[0-9]{7})[A-Z]?\b/g) || [];
+    for (const candidate of refMatches) {
+      const digitsOnly = candidate.replace(/\D/g, '');
+      if (digitsOnly.length === 14 && !digitsOnly.startsWith('03')) {
+        referenceNumber = digitsOnly;
+        break;
+      }
+    }
+  }
+
+  // 3. Fallback Bill Amount: look near "PAYABLE WITHIN DUE DATE" or "WITHIN DUE DATE"
+  if (!billAmount) {
+    const withinMatch = text.match(
+      /WITHIN\s+DUE\s+DATE[\s\S]{0,120}?\b([1-9][0-9,]{1,7})\b/i
+    );
+    if (withinMatch) {
+      billAmount = withinMatch[1].replace(/,/g, '');
+    } else {
+      // Check standalone padded barcode amount like 000000104
+      const paddedMatch = text.match(/[-–]\s*0{2,}([1-9][0-9]{1,6})\s*[-–]/);
+      if (paddedMatch) {
+        billAmount = paddedMatch[1];
+      }
+    }
+  }
+
+  return { referenceNumber, billAmount };
+}
+
+function fileToResizedBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas not supported'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        resolve(dataUrl.split(',')[1]);
+      };
+      img.onerror = () => reject(new Error('Invalid image file'));
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => reject(new Error('Could not read selected image'));
+    reader.readAsDataURL(file);
+  });
+}
 
 interface BillFormProps {
   mode: 'create' | 'edit';
@@ -38,7 +128,12 @@ export const BillForm: React.FC<BillFormProps> = ({
     mode === 'edit' && initialBill ? initialBill.status : 'UNPAID'
   );
   const [submitting, setSubmitting] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (mode === 'create') {
@@ -51,6 +146,51 @@ export const BillForm: React.FC<BillFormProps> = ({
       setCommission(String(defaultCommission));
     }
   }, [defaultCommission, mode, billAmount]);
+
+  const handleBillImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setError(null);
+    setScanNotice(null);
+    setScanning(true);
+
+    try {
+      const base64Data = await fileToResizedBase64(file);
+      let recognizedText = '';
+
+      if (Capacitor.isNativePlatform()) {
+        const res = await BillOcr.scanImage({ base64Data });
+        recognizedText = res?.text || '';
+      } else {
+        throw new Error('Bill photo auto-scan works inside the Android APK.');
+      }
+
+      const extracted = extractFescoBillData(recognizedText);
+
+      if (!extracted.referenceNumber && !extracted.billAmount) {
+        setError('Could not read Reference Number or Price clearly. Please take a sharper photo of the bill.');
+        return;
+      }
+
+      if (extracted.referenceNumber) {
+        setReferenceNumber(extracted.referenceNumber);
+      }
+      if (extracted.billAmount) {
+        setBillAmount(extracted.billAmount);
+      }
+
+      const parts: string[] = [];
+      if (extracted.referenceNumber) parts.push(`Ref: ${extracted.referenceNumber}`);
+      if (extracted.billAmount) parts.push(`Price: ${currencyCode} ${extracted.billAmount}`);
+      setScanNotice(`Auto-filled (${parts.join(' · ')}) — Now enter Commission & Save.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to scan bill image.');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,6 +232,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         setBillAmount('');
         setCommission(String(defaultCommission));
         setStatus('UNPAID');
+        setScanNotice(null);
         onSuccess(res.bill);
       } else if (initialBill) {
         const res = await api.updateBill(initialBill.id, {
@@ -114,6 +255,59 @@ export const BillForm: React.FC<BillFormProps> = ({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+      {/* Hidden File Inputs for Camera & Gallery */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleBillImageSelected}
+        className="hidden"
+      />
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleBillImageSelected}
+        className="hidden"
+      />
+
+      {/* Smart Bill Photo Scanner Bar */}
+      <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-3.5">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-xs font-bold text-blue-900">
+            <Sparkles className="h-4 w-4 shrink-0 text-blue-700" />
+            <span>Auto-Fill Reference # & Price from Bill Photo</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <button
+              type="button"
+              disabled={scanning}
+              onClick={() => cameraInputRef.current?.click()}
+              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-blue-700 px-3.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60"
+            >
+              {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+              <span>{scanning ? 'Reading...' : 'Scan Camera'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={scanning}
+              onClick={() => galleryInputRef.current?.click()}
+              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border border-blue-300 bg-white px-3.5 text-xs font-bold text-blue-800 transition hover:bg-blue-100/60 disabled:opacity-60"
+            >
+              <ImagePlus className="h-4 w-4" />
+              <span>Upload Photo</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {scanNotice && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-800">
+          {scanNotice}
+        </div>
+      )}
+
       {error && (
         <div
           role="alert"
