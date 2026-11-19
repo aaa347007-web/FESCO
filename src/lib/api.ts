@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = {
   owner_name: 'Zahid Nawaz',
   currency_code: 'PKR',
   default_commission: 30,
-  backup_location_label: 'Device Downloads Folder',
+  backup_location_label: 'Device Documents / Downloads Folder',
   auto_backup_reminder: 1,
   updated_at: new Date().toISOString(),
 };
