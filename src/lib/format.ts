@@ -1,6 +1,4 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 
 const PublicDownload = registerPlugin('PublicDownload');
 
@@ -60,37 +58,29 @@ export function formatMonthLabel(monthKey) {
   return `${names[idx] || m} ${y}`;
 }
 
-export async function saveToAndroidDownloads(filename, base64Data, mimeType) {
-  try {
-    await PublicDownload.saveFile({ filename, base64Data, mimeType });
-    return true;
-  } catch {
-    return false;
+function stringToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
+  return btoa(binary);
+}
+
+export async function saveToAndroidDownloads(filename, base64Data, mimeType) {
+  const res = await PublicDownload.saveFile({ filename, base64Data, mimeType });
+  if (!res || !res.saved) {
+    throw new Error('Could not save file to Downloads folder');
+  }
+  return true;
 }
 
 export async function downloadJsonFile(payload, filename = 'fesco-backup.json') {
   const jsonText = JSON.stringify(payload, null, 2);
 
   if (Capacitor.isNativePlatform()) {
-    const base64Data = btoa(unescape(encodeURIComponent(jsonText)));
-    const savedToDownloads = await saveToAndroidDownloads(filename, base64Data, 'application/json');
-
-    const cached = await Filesystem.writeFile({
-      path: filename,
-      data: jsonText,
-      directory: Directory.Cache,
-      encoding: Encoding.UTF8,
-    });
-
-    if (!savedToDownloads) {
-      await Share.share({
-        title: filename,
-        text: 'FESCO JSON Backup',
-        url: cached.uri,
-        dialogTitle: 'Save or Share JSON Backup',
-      });
-    }
+    const base64Data = stringToBase64(jsonText);
+    await saveToAndroidDownloads(filename, base64Data, 'application/json');
     return;
   }
 
