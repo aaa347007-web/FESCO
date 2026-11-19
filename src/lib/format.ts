@@ -1,6 +1,8 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+
+const PublicDownload = registerPlugin('PublicDownload');
 
 export function formatCurrency(amount, currencyCode = 'PKR') {
   const num = Number(amount) || 0;
@@ -58,44 +60,36 @@ export function formatMonthLabel(monthKey) {
   return `${names[idx] || m} ${y}`;
 }
 
+export async function saveToAndroidDownloads(filename, base64Data, mimeType) {
+  try {
+    await PublicDownload.saveFile({ filename, base64Data, mimeType });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function downloadJsonFile(payload, filename = 'fesco-backup.json') {
   const jsonText = JSON.stringify(payload, null, 2);
 
   if (Capacitor.isNativePlatform()) {
-    try {
-      await Filesystem.requestPermissions();
-    } catch {
-      // Ignore on Android 11+
-    }
+    const base64Data = btoa(unescape(encodeURIComponent(jsonText)));
+    const savedToDownloads = await saveToAndroidDownloads(filename, base64Data, 'application/json');
 
-    let saved;
-    try {
-      saved = await Filesystem.writeFile({
-        path: `Download/${filename}`,
-        data: jsonText,
-        directory: Directory.ExternalStorage,
-        encoding: Encoding.UTF8,
-        recursive: true,
-      });
-    } catch {
-      saved = await Filesystem.writeFile({
-        path: filename,
-        data: jsonText,
-        directory: Directory.Documents,
-        encoding: Encoding.UTF8,
-        recursive: true,
-      });
-    }
+    const cached = await Filesystem.writeFile({
+      path: filename,
+      data: jsonText,
+      directory: Directory.Cache,
+      encoding: Encoding.UTF8,
+    });
 
-    try {
+    if (!savedToDownloads) {
       await Share.share({
         title: filename,
-        text: `Saved in Download/${filename}`,
-        url: saved.uri,
-        dialogTitle: 'Share JSON Backup (Already Saved in Download)',
+        text: 'FESCO JSON Backup',
+        url: cached.uri,
+        dialogTitle: 'Save or Share JSON Backup',
       });
-    } catch {
-      // File already saved in Download folder
     }
     return;
   }
