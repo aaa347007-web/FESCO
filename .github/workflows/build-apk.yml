@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies & Capacitor
         run: |
           npm install --legacy-peer-deps
-          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share --legacy-peer-deps
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @capacitor/assets --legacy-peer-deps
 
       - name: Build Web App
         run: npm run build
@@ -47,22 +47,10 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Apply Custom FESCO Logo, Native Plugins & Signing
-        env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - name: Generate Official FESCO Launcher Icons
         run: |
-          echo "$SIGNING_KEY" | base64 -d > android/app/fesco-release.keystore
-
-          # Use Google's fast Maven Central mirror first to avoid repo.maven.apache.org 429 rate limits
-          sed -i 's|mavenCentral()|maven { url "https://maven-central.storage-download.googleapis.com/maven2/" }\n        mavenCentral()|g' android/build.gradle android/settings.gradle 2>/dev/null || true
-
-          # Crop studio margin & generate sharp PNG launcher icons for all Android densities
-          if [ -f "app-icon.png" ]; then
-            sudo apt-get update && sudo apt-get install -y python3-pil
-            python3 -c '
+          sudo apt-get update && sudo apt-get install -y python3-pil
+          python3 -c '
           from PIL import Image
           import os
 
@@ -71,51 +59,32 @@ jobs:
           margin = int(min(w, h) * 0.13)
           cropped = img.crop((margin, margin, w - margin, h - margin))
 
-          fg_size = 432
-          inner_size = int(fg_size * 0.72)
-          fg = Image.new("RGBA", (fg_size, fg_size), (0, 0, 0, 0))
-          resized_inner = cropped.resize((inner_size, inner_size), Image.LANCZOS)
-          offset = (fg_size - inner_size) // 2
-          fg.paste(resized_inner, (offset, offset), resized_inner)
+          os.makedirs("assets", exist_ok=True)
+          # Full square icon (1024x1024)
+          cropped.resize((1024, 1024), Image.LANCZOS).save("assets/icon-only.png", "PNG")
 
-          os.makedirs("android/app/src/main/res/drawable-nodpi", exist_ok=True)
-          fg.save("android/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png", "PNG")
+          # Adaptive foreground with safe zoom so nothing gets clipped
+          fg = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+          inner = cropped.resize((720, 720), Image.LANCZOS)
+          fg.paste(inner, (152, 152), inner)
+          fg.save("assets/icon-foreground.png", "PNG")
 
-          sizes = {
-              "mipmap-mdpi": 48,
-              "mipmap-hdpi": 72,
-              "mipmap-xhdpi": 96,
-              "mipmap-xxhdpi": 144,
-              "mipmap-xxxhdpi": 192,
-          }
-          for folder, sz in sizes.items():
-              out_dir = f"android/app/src/main/res/{folder}"
-              os.makedirs(out_dir, exist_ok=True)
-              icon = cropped.resize((sz, sz), Image.LANCZOS)
-              icon.save(f"{out_dir}/ic_launcher.png", "PNG")
-              icon.save(f"{out_dir}/ic_launcher_round.png", "PNG")
-              icon.save(f"{out_dir}/ic_launcher_foreground.png", "PNG")
+          # Matching dark emerald background
+          bg = Image.new("RGBA", (1024, 1024), (15, 76, 58, 255))
+          bg.save("assets/icon-background.png", "PNG")
           '
-            find android/app/src/main/res -name "ic_launcher*.webp" -delete
+          npx capacitor-assets generate --android
 
-            mkdir -p android/app/src/main/res/values
-            cat << 'EOF' > android/app/src/main/res/values/ic_launcher_background.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#0F4C3A</color>
-          </resources>
-          EOF
+      - name: Add Native Plugins (Downloads + Offline OCR) & Configure Signing
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$SIGNING_KEY" | base64 -d > android/app/fesco-release.keystore
 
-            mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-            cat << 'EOF' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background" />
-              <foreground android:drawable="@drawable/ic_launcher_foreground" />
-          </adaptive-icon>
-          EOF
-            cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-          fi
+          sed -i 's|mavenCentral()|maven { url "https://maven-central.storage-download.googleapis.com/maven2/" }\n        mavenCentral()|g' android/build.gradle android/settings.gradle 2>/dev/null || true
 
           PKG_DIR=$(find android/app/src/main/java -name "MainActivity.java" -exec dirname {} \;)
           PKG_NAME=$(grep "^package " "$PKG_DIR/MainActivity.java" | sed 's/package //;s/;//')
