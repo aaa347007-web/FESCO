@@ -62,38 +62,14 @@ function buildPdfDoc(opts) {
   return doc;
 }
 
-async function handleNativePdf(doc, filename, openShare) {
-  const dataUri = doc.output('datauristring');
-  const base64Data = dataUri.split(',')[1];
-
-  const savedToDownloads = await saveToAndroidDownloads(filename, base64Data, 'application/pdf');
-
-  const cached = await Filesystem.writeFile({
-    path: filename,
-    data: base64Data,
-    directory: Directory.Cache,
-  });
-
-  if (openShare || !savedToDownloads) {
-    try {
-      await Share.share({
-        title: filename,
-        text: 'FESCO Bill Manager Report',
-        url: cached.uri,
-        dialogTitle: 'Share or Save PDF Report',
-      });
-    } catch {
-      // Share sheet closed
-    }
-  }
-}
-
 export async function downloadReportPdf(opts) {
   const doc = buildPdfDoc(opts);
   const filename = opts.filename || 'FESCO-Report.pdf';
 
   if (Capacitor.isNativePlatform()) {
-    await handleNativePdf(doc, filename, false);
+    const dataUri = doc.output('datauristring');
+    const base64Data = dataUri.split(',')[1];
+    await saveToAndroidDownloads(filename, base64Data, 'application/pdf');
     return;
   }
 
@@ -105,7 +81,19 @@ export async function shareReportPdf(opts) {
   const filename = opts.filename || 'FESCO-Report.pdf';
 
   if (Capacitor.isNativePlatform()) {
-    await handleNativePdf(doc, filename, true);
+    const dataUri = doc.output('datauristring');
+    const base64Data = dataUri.split(',')[1];
+    const cached = await Filesystem.writeFile({
+      path: filename,
+      data: base64Data,
+      directory: Directory.Cache,
+    });
+    await Share.share({
+      title: filename,
+      text: 'FESCO Bill Manager Report',
+      url: cached.uri,
+      dialogTitle: 'Share PDF Report',
+    });
     return 'shared';
   }
 
