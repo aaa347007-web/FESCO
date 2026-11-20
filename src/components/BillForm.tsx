@@ -11,10 +11,28 @@ interface BillOcrPlugin {
 
 const BillOcr = registerPlugin<BillOcrPlugin>('BillOcr');
 
-function extractUtilityBillData(rawText: string): { referenceNumber: string; billAmount: string } {
+const ELECTRIC_14_DIGIT_COMPANIES = new Set([
+  'FESCO',
+  'LESCO',
+  'MEPCO',
+  'GEPCO',
+  'IESCO',
+  'PESCO',
+  'HESCO',
+  'SEPCO',
+  'QESCO',
+  'TESCO',
+]);
+
+function extractUtilityBillData(
+  rawText: string,
+  companyId: string
+): { referenceNumber: string; billAmount: string } {
   const text = rawText.replace(/\r/g, '\n');
   let referenceNumber = '';
   let billAmount = '';
+
+  const is14DigitElectric = ELECTRIC_14_DIGIT_COMPANIES.has((companyId || 'FESCO').toUpperCase());
 
   // 1. Check WAPDA/DISCO barcode summary line: e.g. "NOV 26 - 01 13462 0074301 - 000000104 - 23 NOV 26"
   const barcodeLineMatch = text.match(
@@ -26,19 +44,57 @@ function extractUtilityBillData(rawText: string): { referenceNumber: string; bil
     billAmount = barcodeLineMatch[2];
   }
 
-  // 2. Fallback Reference / Consumer Number: 10 to 14 digits (ignoring 03xx mobile numbers)
-  if (!referenceNumber) {
-    const refMatches = text.match(/\b([0-9]{2}\s*[0-9]{5}\s*[0-9]{7}|[0-9]{10,14})[A-Z]?\b/g) || [];
+  // 2. For 14-digit WAPDA/DISCO companies (FESCO, LESCO, etc.), strictly extract ONLY 14-digit Reference Number (ignore 10-digit Consumer ID)
+  if (!referenceNumber && is14DigitElectric) {
+    // Pattern A: Formatted 2 + 5 + 7 digits (e.g. "24 13214 5109584" or "24-13214-5109584 U")
+    const spaced14Matches = text.match(/\b([0-9]{2}[\s-]*[0-9]{5}[\s-]*[0-9]{7})(?:\s*[A-Z])?\b/g) || [];
+    for (const candidate of spaced14Matches) {
+      const digitsOnly = candidate.replace(/\D/g, '');
+      if (digitsOnly.length === 14 && !digitsOnly.startsWith('03')) {
+        referenceNumber = digitsOnly;
+        break;
+      }
+    }
+
+    // Pattern B: Near "REFERENCE NO" label (allowing spaces/dashes across 14 digits)
+    if (!referenceNumber) {
+      const refLabelMatch = text.match(
+        /REFERENCE\s*(?:NO|NUMBER|#)?[\s:.-]*([0-9][0-9\s-]{12,20}[0-9])/i
+      );
+      if (refLabelMatch) {
+        const digitsOnly = refLabelMatch[1].replace(/\D/g, '');
+        if (digitsOnly.length === 14) {
+          referenceNumber = digitsOnly;
+        }
+      }
+    }
+
+    // Pattern C: Any standalone 14-digit block (strictly length === 14, skipping 10-digit Consumer ID)
+    if (!referenceNumber) {
+      const allNumberBlocks = text.match(/[0-9][0-9\s-]{12,18}[0-9]/g) || [];
+      for (const block of allNumberBlocks) {
+        const digitsOnly = block.replace(/\D/g, '');
+        if (digitsOnly.length === 14 && !digitsOnly.startsWith('03')) {
+          referenceNumber = digitsOnly;
+          break;
+        }
+      }
+    }
+  }
+
+  // 3. Fallback for Non-14-digit utilities (KE = 13 digits, SNGPL = 11 digits, SSGC = 10 digits, PTCL = 10 digits)
+  if (!referenceNumber && !is14DigitElectric) {
+    const refMatches = text.match(/\b([0-9]{10,13})\b/g) || [];
     for (const candidate of refMatches) {
       const digitsOnly = candidate.replace(/\D/g, '');
-      if (digitsOnly.length >= 10 && digitsOnly.length <= 14 && !digitsOnly.startsWith('03')) {
+      if (digitsOnly.length >= 10 && digitsOnly.length <= 13 && !digitsOnly.startsWith('03')) {
         referenceNumber = digitsOnly;
         break;
       }
     }
   }
 
-  // 3. Fallback Bill Amount: look near "PAYABLE WITHIN DUE DATE" or "WITHIN DUE DATE"
+  // 4. Fallback Bill Amount: look near "PAYABLE WITHIN DUE DATE" or "WITHIN DUE DATE"
   if (!billAmount) {
     const withinMatch = text.match(
       /WITHIN\s+DUE\s+DATE[\s\S]{0,120}?\b([1-9][0-9,]{1,7})\b/i
@@ -184,10 +240,10 @@ export const BillForm: React.FC<BillFormProps> = ({
         throw new Error('Bill photo auto-scan works inside the Android APK.');
       }
 
-      const extracted = extractUtilityBillData(recognizedText);
+      const extracted = extractUtilityBillData(recognizedText, selectedCompany);
 
       if (!extracted.referenceNumber && !extracted.billAmount) {
-        setError('Could not read Reference Number or Price clearly. Please take a sharper photo of the bill.');
+        setError('Could not read 14-digit Reference Number or Price clearly. Please take a sharper photo of the bill.');
         return;
       }
 
