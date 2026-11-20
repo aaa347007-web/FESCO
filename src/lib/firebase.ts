@@ -5,7 +5,9 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  User,
+  setPersistence,
+  browserLocalPersistence,
+  type User,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -28,6 +30,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Keep user logged in permanently across app restarts until explicit logout
+setPersistence(auth, browserLocalPersistence).catch(() => {});
 
 export function normalizePakPhone(rawPhone: string): string {
   let digits = rawPhone.replace(/\D/g, '');
@@ -78,6 +83,7 @@ export async function signUpWithPhonePin(phone: string, pin: string, shopName?: 
   if (!/^\d{6}$/.test(pin)) {
     throw new Error('6-hindso ka PIN likhein (maslan 123456)');
   }
+  await setPersistence(auth, browserLocalPersistence);
   const email = phoneToEmail(cleanPhone);
   const cred = await createUserWithEmailAndPassword(auth, email, pin);
 
@@ -102,6 +108,7 @@ export async function signInWithPhonePin(phone: string, pin: string) {
   if (!/^\d{6}$/.test(pin)) {
     throw new Error('6-hindso ka PIN likhein');
   }
+  await setPersistence(auth, browserLocalPersistence);
   const email = phoneToEmail(cleanPhone);
   const cred = await signInWithEmailAndPassword(auth, email, pin);
   return cred.user;
