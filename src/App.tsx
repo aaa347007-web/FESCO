@@ -3,13 +3,21 @@ import {
   CalendarDays,
   CheckCircle2,
   Cloud,
+  CloudOff,
   DatabaseBackup,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
   LayoutDashboard,
+  Loader2,
+  Lock,
+  LogOut,
+  Phone,
   Plus,
   PlusCircle,
   Search,
   Settings as SettingsIcon,
+  Store,
   Zap,
 } from 'lucide-react';
 import { BillHistoryModal } from './components/BillHistoryModal';
@@ -20,12 +28,16 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { initAdMobAndShowBanner, showInterstitialAd } from './lib/admob';
 import { api } from './lib/api';
 import {
+  auth,
   emailToPhone,
   loadCloudBackup,
+  logoutUser,
+  mapFirebaseAuthError,
   onAuthStateChanged,
   saveCloudBackup,
+  signInWithPhonePin,
+  signUpWithPhonePin,
   type User,
-  auth,
 } from './lib/firebase';
 import { formatCurrency } from './lib/format';
 import type { AppSettings, Bill, DashboardStats, MonthlySummary, PaymentStatus } from './types/bill';
@@ -90,12 +102,23 @@ export default function App() {
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [historyBillId, setHistoryBillId] = useState<number | null>(null);
 
-  // Cloud Auth & Sync States
+  // Auth & Cloud Sync States
+  const [authChecking, setAuthChecking] = useState(true);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const isRestoringRef = useRef(false);
+
+  // Full-Screen Welcome Gate Form States (Default to Sign Up for new users)
+  const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup');
+  const [authShopName, setAuthShopName] = useState('');
+  const [authPhone, setAuthPhone] = useState('');
+  const [authPin, setAuthPin] = useState('');
+  const [authConfirmPin, setAuthConfirmPin] = useState('');
+  const [showAuthPin, setShowAuthPin] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
 
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
@@ -135,7 +158,6 @@ export default function App() {
     loadAll();
   }, [loadAll]);
 
-  // Upload local backup to Firebase Cloud
   const syncNowToCloud = useCallback(async (targetUser?: User | null) => {
     const activeUser = targetUser ?? auth.currentUser;
     if (!activeUser || isRestoringRef.current) return;
@@ -153,10 +175,10 @@ export default function App() {
     }
   }, []);
 
-  // Listen to Firebase Auth state changes
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setCloudUser(u);
+      setAuthChecking(false);
       if (u) {
         try {
           isRestoringRef.current = true;
@@ -199,6 +221,48 @@ export default function App() {
       isRestoringRef.current = false;
     }
     await syncNowToCloud(loggedInUser);
+  };
+
+  const handleWelcomeGateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+
+    if (authMode === 'signup' && authPin !== authConfirmPin) {
+      setAuthError('Dono 6-hindso wale PIN ek jaise hone chahiye.');
+      return;
+    }
+
+    setAuthBusy(true);
+    try {
+      if (authMode === 'signup') {
+        const newUser = await signUpWithPhonePin(authPhone, authPin, authShopName);
+        if (authShopName.trim()) {
+          await api.updateSettings({ shop_name: authShopName.trim() });
+          await loadAll();
+        }
+        await handleCloudAuthSuccess(newUser, true);
+        showToast('Account ban gaya aur data cloud par mehfooz ho gaya!');
+      } else {
+        const existingUser = await signInWithPhonePin(authPhone, authPin);
+        await handleCloudAuthSuccess(existingUser, false);
+        showToast('Login kamyab! Aap ka hisab sync ho gaya.');
+      }
+      setAuthPin('');
+      setAuthConfirmPin('');
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleQuickLogout = async () => {
+    try {
+      await logoutUser();
+      showToast('Aap apne account se logout ho gaye hain.');
+    } catch {
+      showToast('Logout mein masla aaya.', 'error');
+    }
   };
 
   const handleTabChange = async (tab: NavTab) => {
@@ -250,6 +314,191 @@ export default function App() {
     setActiveTab('bills');
   };
 
+  // 1. Checking saved login session
+  if (authChecking) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 text-slate-900">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-700 text-white shadow-md">
+          <Zap className="h-7 w-7" />
+        </div>
+        <h1 className="mt-4 text-lg font-extrabold">Pak Bill Manager</h1>
+        <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin text-blue-700" />
+          <span>Account check ho raha hai...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Mandatory Sign Up / Sign In Screen for logged-out / new users
+  if (!cloudUser) {
+    return (
+      <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-4 py-8 text-slate-900">
+        <div className="mx-auto w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
+          {/* Top Brand Header */}
+          <div className="bg-blue-700 px-6 py-6 text-center text-white">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
+              <Zap className="h-6 w-6" />
+            </div>
+            <h1 className="mt-3 text-xl font-extrabold tracking-tight">Pak Bill Manager</h1>
+            <p className="mt-1 text-xs text-blue-100">
+              Apne Mobile Number aur 6-Digit PIN se Account Banayein ya Login Karein
+            </p>
+          </div>
+
+          <div className="p-6">
+            {/* Sign Up / Sign In Switcher */}
+            <div className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('signup');
+                  setAuthError('');
+                }}
+                className={`h-10 rounded-lg text-xs font-extrabold transition ${
+                  authMode === 'signup'
+                    ? 'bg-white text-blue-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Create Account (Sign Up)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('signin');
+                  setAuthError('');
+                }}
+                className={`h-10 rounded-lg text-xs font-extrabold transition ${
+                  authMode === 'signin'
+                    ? 'bg-white text-blue-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Sign In (Login)
+              </button>
+            </div>
+
+            <form onSubmit={handleWelcomeGateSubmit} className="space-y-4">
+              {authMode === 'signup' && (
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">
+                    Shop / Counter Name
+                  </label>
+                  <div className="relative">
+                    <Store className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={authShopName}
+                      onChange={(e) => setAuthShopName(e.target.value)}
+                      placeholder="Maslan: Zahid Mobiles and Photo State"
+                      className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 text-sm text-slate-900 outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Mobile Number (11 Hindse)
+                </label>
+                <div className="relative">
+                  <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    maxLength={11}
+                    required
+                    value={authPhone}
+                    onChange={(e) => setAuthPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                    placeholder="03001234567"
+                    className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 font-mono text-base font-bold tracking-wider text-slate-900 outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  6-Digit Secret PIN
+                </label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type={showAuthPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    value={authPin}
+                    onChange={(e) => setAuthPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                    className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-10 font-mono text-base font-bold tracking-widest text-slate-900 outline-none focus:border-blue-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPin((s) => !s)}
+                    aria-label="Toggle PIN visibility"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700"
+                  >
+                    {showAuthPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {authMode === 'signup' && (
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">
+                    Confirm 6-Digit PIN
+                  </label>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type={showAuthPin ? 'text' : 'password'}
+                      inputMode="numeric"
+                      maxLength={6}
+                      required
+                      value={authConfirmPin}
+                      onChange={(e) =>
+                        setAuthConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                      }
+                      placeholder="••••••"
+                      className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 font-mono text-base font-bold tracking-widest text-slate-900 outline-none focus:border-blue-600"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {authError && (
+                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">
+                  <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{authError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authBusy}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60"
+              >
+                <Cloud className="h-4 w-4" />
+                <span>
+                  {authBusy
+                    ? 'Please wait...'
+                    : authMode === 'signup'
+                      ? 'Create Account & Start'
+                      : 'Sign In & Open App'}
+                </span>
+              </button>
+            </form>
+
+            <p className="mt-4 text-center text-[11px] text-slate-500">
+              Ek baar login karne ke baad aap hamesha login rahenge jab tak aap khud Logout na karein.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const currencyCode = settings.currency_code || 'PKR';
   const activeItem = NAV_ITEMS.find((n) => n.id === activeTab) ?? NAV_ITEMS[0];
 
@@ -292,25 +541,27 @@ export default function App() {
         </nav>
 
         <div className="space-y-3 border-t border-slate-200 p-4">
-          <button
-            type="button"
-            onClick={() => setCloudModalOpen(true)}
-            className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left text-xs font-bold transition ${
-              cloudUser
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                : 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100'
-            }`}
-          >
-            <div className="flex items-center gap-2 truncate">
-              <Cloud className="h-4 w-4 shrink-0" />
-              <span className="truncate">
-                {cloudUser ? emailToPhone(cloudUser.email) : 'Cloud Backup Off'}
-              </span>
-            </div>
-            <span className="shrink-0 text-[10px] underline">
-              {cloudUser ? 'Synced' : 'Login'}
-            </span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCloudModalOpen(true)}
+              className="flex flex-1 items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-left text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Cloud className="h-4 w-4 shrink-0" />
+                <span className="truncate">{emailToPhone(cloudUser.email)}</span>
+              </div>
+              <span className="shrink-0 text-[10px] underline">Sync</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleQuickLogout}
+              title="Logout"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 transition hover:bg-red-100"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
 
           <div className="rounded-xl bg-blue-50 p-3.5">
             <div className="text-xs font-medium text-blue-800">Earned Commission</div>
@@ -341,14 +592,20 @@ export default function App() {
             <button
               type="button"
               onClick={() => setCloudModalOpen(true)}
-              className={`flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-extrabold transition ${
-                cloudUser
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : 'border-amber-200 bg-amber-50 text-amber-800'
-              }`}
+              className="flex h-9 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-extrabold text-emerald-700 transition"
             >
               <Cloud className={`h-3.5 w-3.5 ${cloudSyncing ? 'animate-pulse' : ''}`} />
-              <span>{cloudUser ? 'Synced' : 'Cloud'}</span>
+              <span>Synced</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleQuickLogout}
+              aria-label="Logout"
+              className="flex h-9 items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-2.5 text-xs font-extrabold text-red-700 transition hover:bg-red-100"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Logout</span>
             </button>
 
             <PWAInstallButton variant="compact" />
@@ -385,14 +642,19 @@ export default function App() {
             <button
               type="button"
               onClick={() => setCloudModalOpen(true)}
-              className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-xs font-extrabold transition ${
-                cloudUser
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                  : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-              }`}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 text-xs font-extrabold text-emerald-700 transition hover:bg-emerald-100"
             >
               <Cloud className={`h-4 w-4 ${cloudSyncing ? 'animate-pulse' : ''}`} />
-              <span>{cloudUser ? `Synced (${emailToPhone(cloudUser.email)})` : 'Cloud Login'}</span>
+              <span>Synced ({emailToPhone(cloudUser.email)})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleQuickLogout}
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3.5 text-xs font-extrabold text-red-700 transition hover:bg-red-100"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Logout</span>
             </button>
 
             <PWAInstallButton variant="compact" />
