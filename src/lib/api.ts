@@ -106,7 +106,8 @@ export const api = {
         (b) =>
           String(b.reference_number || '').toLowerCase().includes(q) ||
           String(b.serial_number || '').toLowerCase().includes(q) ||
-          String(b.customer_name || '').toLowerCase().includes(q)
+          String(b.customer_name || '').toLowerCase().includes(q) ||
+          String(b.customer_phone || '').toLowerCase().includes(q)
       );
     }
     bills.sort((a, b) => Number(b.serial_number || 0) - Number(a.serial_number || 0));
@@ -126,12 +127,14 @@ export const api = {
       id: Date.now(),
       serial_number: Number(data.serial_number || bills.length + 1),
       reference_number: ref,
-      customer_name: data.customer_name || '',
+      customer_name: String(data.customer_name || '').trim(),
+      customer_phone: String(data.customer_phone || '').trim(),
       bill_amount: Number(data.bill_amount || 0),
       commission,
       status,
       bill_date: data.bill_date || getTodayStr(),
       due_date: data.due_date || '',
+      added_at: now,
       paid_at: status === 'PAID' ? now : null,
       notes: data.notes || '',
       created_at: now,
@@ -163,6 +166,12 @@ export const api = {
     const bill = {
       ...old,
       ...data,
+      customer_name:
+        data.customer_name !== undefined ? String(data.customer_name).trim() : old.customer_name || '',
+      customer_phone:
+        data.customer_phone !== undefined
+          ? String(data.customer_phone).trim()
+          : old.customer_phone || '',
       bill_amount: data.bill_amount !== undefined ? Number(data.bill_amount) : old.bill_amount,
       commission: comm,
       status,
