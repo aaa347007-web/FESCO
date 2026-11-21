@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
+  Banknote,
+  Building2,
   Calendar,
   Camera,
   CheckCircle2,
@@ -11,13 +13,14 @@ import {
   Phone,
   RotateCcw,
   Save,
+  Smartphone,
   Sparkles,
   User,
   Wallet,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PAK_UTILITY_COMPANIES } from '../lib/pakCompanies';
-import type { Bill, PaymentStatus } from '../types/bill';
+import type { Bill, PaymentAccount, PaymentStatus } from '../types/bill';
 
 interface BillOcrPlugin {
   scanImage(options: { base64Data: string }): Promise<{ text: string }>;
@@ -37,6 +40,38 @@ const ELECTRIC_14_DIGIT_COMPANIES = new Set([
   'QESCO',
   'TESCO',
 ]);
+
+const ACCOUNT_OPTIONS: {
+  id: PaymentAccount;
+  label: string;
+  activeClass: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  {
+    id: 'CASH',
+    label: 'Cash',
+    activeClass: 'border-slate-800 bg-slate-800 text-white',
+    icon: Banknote,
+  },
+  {
+    id: 'EASYPAISA',
+    label: 'Easypaisa',
+    activeClass: 'border-emerald-600 bg-emerald-600 text-white',
+    icon: Smartphone,
+  },
+  {
+    id: 'JAZZCASH',
+    label: 'JazzCash',
+    activeClass: 'border-red-600 bg-red-600 text-white',
+    icon: Smartphone,
+  },
+  {
+    id: 'BANK',
+    label: 'Bank / Raast',
+    activeClass: 'border-blue-700 bg-blue-700 text-white',
+    icon: Building2,
+  },
+];
 
 const MONTH_MAP: Record<string, string> = {
   JAN: '01',
@@ -283,6 +318,9 @@ export const BillForm: React.FC<BillFormProps> = ({
         )
       : ''
   );
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount>(
+    mode === 'edit' && initialBill ? initialBill.payment_account || 'CASH' : 'CASH'
+  );
   const [customerName, setCustomerName] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.customer_name || '' : ''
   );
@@ -456,6 +494,7 @@ export const BillForm: React.FC<BillFormProps> = ({
           customer_name: cleanedName,
           customer_phone: cleanedPhone,
           due_date: cleanedDueDate,
+          payment_account: paymentAccount,
           bill_amount: parsedAmount,
           received_amount: finalReceived,
           commission: parsedCommission,
@@ -478,6 +517,7 @@ export const BillForm: React.FC<BillFormProps> = ({
           customer_name: cleanedName,
           customer_phone: cleanedPhone,
           due_date: cleanedDueDate,
+          payment_account: paymentAccount,
           bill_amount: parsedAmount,
           received_amount: finalReceived,
           commission: parsedCommission,
@@ -661,7 +701,35 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 3. Udhar / Partial Payment Box (Received vs Remaining Balance) */}
+      {/* 3. Payment Account / Source Selector */}
+      <div>
+        <span className="mb-1.5 block text-sm font-semibold text-slate-800">
+          Payment Account / Source <span className="text-xs font-normal text-slate-500">(Kis Account Se Pay Hua)</span>
+        </span>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {ACCOUNT_OPTIONS.map((opt) => {
+            const Icon = opt.icon;
+            const selected = paymentAccount === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setPaymentAccount(opt.id)}
+                className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-extrabold transition ${
+                  selected
+                    ? `${opt.activeClass} shadow-xs`
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 4. Udhar / Partial Payment Box */}
       <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3.5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -724,7 +792,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 4. Due Date & Customer Name */}
+      {/* 5. Due Date & Customer Name */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label
@@ -766,7 +834,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 5. Phone Number (Optional) */}
+      {/* 6. Phone Number (Optional) */}
       <div>
         <label
           htmlFor="bill-customer-phone"
@@ -789,7 +857,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 6. Commission & Payment Status */}
+      {/* 7. Commission & Payment Status */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label
