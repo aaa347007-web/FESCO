@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -40,6 +43,8 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @capacitor/browser @capacitor/assets @capacitor-community/admob --legacy-peer-deps
 
       - name: Build Web App
+        env:
+          VITE_APP_BUILD_NUMBER: ${{ github.run_number }}
         run: npm run build
 
       - name: Initialize & Sync Android Project
@@ -251,10 +256,19 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk ../Pak-Bill-Manager.apk
 
       - name: Upload Signed APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: FESCO-Bills-Manager-Signed-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
-          
+          path: Pak-Bill-Manager.apk
+
+      - name: Publish Auto-Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Pak Bill Manager v1.0.${{ github.run_number }}
+          body: "Pak Bill Manager automatic release v1.0.${{ github.run_number }} with latest features and improvements."
+          files: Pak-Bill-Manager.apk
+          make_latest: true
