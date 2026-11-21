@@ -11,6 +11,8 @@ export interface Bill {
   id: number;
   serial_number: number;
   reference_number: string;
+  customer_name?: string;
+  customer_phone?: string;
   bill_amount: number;
   commission: number;
   status: PaymentStatus;
