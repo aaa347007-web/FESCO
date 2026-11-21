@@ -17,6 +17,7 @@ import {
   Search,
   TrendingUp,
   User,
+  Wallet,
   X,
   Zap,
 } from 'lucide-react';
@@ -159,12 +160,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     nextSerialNumber: 1,
     recentBills: [],
     urgentUnpaidBills: [],
+    totalUdharAmount: 0,
+    udharBillsCount: 0,
   };
 
   const urgentBills = s.urgentUnpaidBills ?? [];
+  const totalUdhar = s.totalUdharAmount ?? 0;
+  const udharCount = s.udharBillsCount ?? 0;
 
   return (
     <div className="space-y-6">
+      {/* Udhar / Partial Payment Summary Strip */}
+      {totalUdhar > 0 && (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3.5 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white">
+              <Wallet className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-orange-900">
+                Total Customer Udhar ({udharCount} {udharCount === 1 ? 'Bill' : 'Bills'})
+              </div>
+              <div className="font-mono text-base font-extrabold text-red-700">
+                {formatCurrency(totalUdhar, currencyCode)} Baqaya
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('bills')}
+            className="inline-flex min-h-[38px] items-center gap-1 rounded-xl bg-orange-600 px-3.5 text-xs font-extrabold text-white hover:bg-orange-700"
+          >
+            <span>View Udhar List</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </section>
+      )}
+
       {/* Urgent Unpaid Due Date Reminder Alert */}
       {urgentBills.length > 0 && (
         <section
