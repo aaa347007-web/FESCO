@@ -26,7 +26,7 @@ export const BillCollection: React.FC<BillTableProps> = ({
   onDelete,
   onViewHistory,
   emptyTitle = 'No bill records found',
-  emptyDescription = 'Add a new FESCO bill or adjust your search and filters.',
+  emptyDescription = 'Add a new utility bill or adjust your search and filters.',
   emptyAction,
 }) => {
   if (bills.length === 0) {
@@ -64,7 +64,8 @@ export const BillCollection: React.FC<BillTableProps> = ({
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
                 <th className="px-4 py-3.5">Serial #</th>
-                <th className="px-4 py-3.5">FESCO Reference #</th>
+                <th className="px-4 py-3.5">Bill Reference #</th>
+                <th className="px-4 py-3.5">Customer & Phone</th>
                 <th className="px-4 py-3.5 text-right">Bill Amount</th>
                 <th className="px-4 py-3.5 text-right">Commission</th>
                 <th className="px-4 py-3.5">Payment Status</th>
@@ -84,6 +85,22 @@ export const BillCollection: React.FC<BillTableProps> = ({
                     </td>
                     <td className="px-4 py-3 font-mono font-semibold text-slate-900 whitespace-nowrap">
                       {bill.reference_number}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {bill.customer_name || bill.customer_phone ? (
+                        <div>
+                          {bill.customer_name && (
+                            <div className="font-semibold text-slate-900">{bill.customer_name}</div>
+                          )}
+                          {bill.customer_phone && (
+                            <div className="font-mono text-xs text-slate-500">
+                              {bill.customer_phone}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right font-mono font-semibold text-slate-900 tabular-nums whitespace-nowrap">
                       {formatCurrency(bill.bill_amount, currencyCode)}
