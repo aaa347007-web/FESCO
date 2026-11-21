@@ -15,6 +15,8 @@ export interface Bill {
   customer_phone?: string;
   due_date?: string;
   bill_amount: number;
+  received_amount?: number;
+  remaining_amount?: number;
   commission: number;
   status: PaymentStatus;
   added_at: string;
@@ -55,6 +57,8 @@ export interface DashboardStats {
   nextSerialNumber: number;
   recentBills: Bill[];
   urgentUnpaidBills?: Bill[];
+  totalUdharAmount?: number;
+  udharBillsCount?: number;
 }
 
 export interface MonthlySummary {
