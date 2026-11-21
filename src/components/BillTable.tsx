@@ -4,6 +4,13 @@ import { formatCurrency, formatDateTime } from '../lib/format';
 import type { Bill, PaymentStatus } from '../types/bill';
 import { BillCard } from './BillRowCard';
 
+function getTodayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
+
 interface BillTableProps {
   bills: Bill[];
   currencyCode: string;
@@ -39,6 +46,8 @@ export const BillCollection: React.FC<BillTableProps> = ({
     );
   }
 
+  const todayIso = getTodayIso();
+
   return (
     <>
       {/* Mobile & Tablet Card Stack */}
@@ -66,6 +75,7 @@ export const BillCollection: React.FC<BillTableProps> = ({
                 <th className="px-4 py-3.5">Serial #</th>
                 <th className="px-4 py-3.5">Bill Reference #</th>
                 <th className="px-4 py-3.5">Customer & Phone</th>
+                <th className="px-4 py-3.5">Due Date</th>
                 <th className="px-4 py-3.5 text-right">Bill Amount</th>
                 <th className="px-4 py-3.5 text-right">Commission</th>
                 <th className="px-4 py-3.5">Payment Status</th>
@@ -78,6 +88,8 @@ export const BillCollection: React.FC<BillTableProps> = ({
               {bills.map((bill) => {
                 const isPaid = bill.status === 'PAID';
                 const busy = togglingId === bill.id;
+                const isOverdue = !isPaid && Boolean(bill.due_date && bill.due_date < todayIso);
+                const isDueToday = !isPaid && bill.due_date === todayIso;
                 return (
                   <tr key={bill.id} className="transition hover:bg-blue-50/35">
                     <td className="px-4 py-3 font-mono font-bold text-blue-700 tabular-nums whitespace-nowrap">
@@ -98,6 +110,23 @@ export const BillCollection: React.FC<BillTableProps> = ({
                             </div>
                           )}
                         </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {bill.due_date ? (
+                        <span
+                          className={`inline-flex rounded-md px-2 py-0.5 font-mono text-xs font-bold ${
+                            isOverdue
+                              ? 'bg-red-100 text-red-700'
+                              : isDueToday
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {bill.due_date}
+                        </span>
                       ) : (
                         <span className="text-xs text-slate-400">—</span>
                       )}
