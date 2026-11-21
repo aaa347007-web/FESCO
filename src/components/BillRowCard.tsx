@@ -1,13 +1,26 @@
 import React from 'react';
 import { Calendar, CheckCircle2, Clock, Edit3, History, Phone, Trash2, User } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '../lib/format';
-import type { Bill, PaymentStatus } from '../types/bill';
+import type { Bill, PaymentAccount, PaymentStatus } from '../types/bill';
 
 function getTodayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
   ).padStart(2, '0')}`;
+}
+
+function getAccountBadge(acc?: PaymentAccount): { label: string; className: string } {
+  switch (acc) {
+    case 'EASYPAISA':
+      return { label: 'Easypaisa', className: 'bg-emerald-100 text-emerald-800' };
+    case 'JAZZCASH':
+      return { label: 'JazzCash', className: 'bg-red-100 text-red-800' };
+    case 'BANK':
+      return { label: 'Bank / Raast', className: 'bg-blue-100 text-blue-800' };
+    default:
+      return { label: 'Cash', className: 'bg-slate-100 text-slate-700' };
+  }
 }
 
 interface BillListItemProps {
@@ -34,6 +47,7 @@ export const BillCard: React.FC<BillListItemProps> = ({
   const todayIso = getTodayIso();
   const isOverdue = !isPaid && Boolean(bill.due_date && bill.due_date < todayIso);
   const isDueToday = !isPaid && bill.due_date === todayIso;
+  const accBadge = getAccountBadge(bill.payment_account);
 
   const received = isPaid ? bill.bill_amount : Math.max(0, Number(bill.received_amount || 0));
   const remaining = isPaid ? 0 : Math.max(0, bill.bill_amount - received);
@@ -55,8 +69,10 @@ export const BillCard: React.FC<BillListItemProps> = ({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <span className="font-mono font-bold text-blue-700">#{bill.serial_number}</span>
-            <span aria-hidden="true">·</span>
-            <span>Added {formatDateTime(bill.added_at)}</span>
+            <span className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold ${accBadge.className}`}>
+              {accBadge.label}
+            </span>
+            <span>{formatDateTime(bill.added_at)}</span>
           </div>
           <div className="mt-1 font-mono text-base font-bold tracking-tight text-slate-900 break-all">
             {bill.reference_number}
