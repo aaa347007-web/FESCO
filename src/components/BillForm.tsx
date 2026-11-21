@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { Camera, CheckCircle2, Clock, Hash, ImagePlus, Loader2, RotateCcw, Save, Sparkles } from 'lucide-react';
+import { Camera, CheckCircle2, Clock, Hash, ImagePlus, Loader2, Phone, RotateCcw, Save, Sparkles, User } from 'lucide-react';
 import { api } from '../lib/api';
 import { PAK_UTILITY_COMPANIES } from '../lib/pakCompanies';
 import type { Bill, PaymentStatus } from '../types/bill';
@@ -34,7 +34,6 @@ function extractUtilityBillData(
 
   const is14DigitElectric = ELECTRIC_14_DIGIT_COMPANIES.has((companyId || 'FESCO').toUpperCase());
 
-  // 1. Check WAPDA/DISCO barcode summary line: e.g. "NOV 26 - 01 13462 0074301 - 000000104 - 23 NOV 26"
   const barcodeLineMatch = text.match(
     /\b([0-9]{2}\s*[0-9]{5}\s*[0-9]{7})\s*[-–]\s*0*([1-9][0-9]{0,6})\s*[-–]\s*[0-9]{1,2}\s*[A-Z]{3}\s*[0-9]{2}/i
   );
@@ -44,9 +43,7 @@ function extractUtilityBillData(
     billAmount = barcodeLineMatch[2];
   }
 
-  // 2. For 14-digit WAPDA/DISCO companies (FESCO, LESCO, etc.), strictly extract ONLY 14-digit Reference Number (ignore 10-digit Consumer ID)
   if (!referenceNumber && is14DigitElectric) {
-    // Pattern A: Formatted 2 + 5 + 7 digits (e.g. "24 13214 5109584" or "24-13214-5109584 U")
     const spaced14Matches = text.match(/\b([0-9]{2}[\s-]*[0-9]{5}[\s-]*[0-9]{7})(?:\s*[A-Z])?\b/g) || [];
     for (const candidate of spaced14Matches) {
       const digitsOnly = candidate.replace(/\D/g, '');
@@ -56,7 +53,6 @@ function extractUtilityBillData(
       }
     }
 
-    // Pattern B: Near "REFERENCE NO" label (allowing spaces/dashes across 14 digits)
     if (!referenceNumber) {
       const refLabelMatch = text.match(
         /REFERENCE\s*(?:NO|NUMBER|#)?[\s:.-]*([0-9][0-9\s-]{12,20}[0-9])/i
@@ -69,7 +65,6 @@ function extractUtilityBillData(
       }
     }
 
-    // Pattern C: Any standalone 14-digit block (strictly length === 14, skipping 10-digit Consumer ID)
     if (!referenceNumber) {
       const allNumberBlocks = text.match(/[0-9][0-9\s-]{12,18}[0-9]/g) || [];
       for (const block of allNumberBlocks) {
@@ -82,7 +77,6 @@ function extractUtilityBillData(
     }
   }
 
-  // 3. Fallback for Non-14-digit utilities (KE = 13 digits, SNGPL = 11 digits, SSGC = 10 digits, PTCL = 10 digits)
   if (!referenceNumber && !is14DigitElectric) {
     const refMatches = text.match(/\b([0-9]{10,13})\b/g) || [];
     for (const candidate of refMatches) {
@@ -94,7 +88,6 @@ function extractUtilityBillData(
     }
   }
 
-  // 4. Fallback Bill Amount: look near "PAYABLE WITHIN DUE DATE" or "WITHIN DUE DATE"
   if (!billAmount) {
     const withinMatch = text.match(
       /WITHIN\s+DUE\s+DATE[\s\S]{0,120}?\b([1-9][0-9,]{1,7})\b/i
@@ -179,6 +172,12 @@ export const BillForm: React.FC<BillFormProps> = ({
   const [referenceNumber, setReferenceNumber] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.reference_number : prefillReference || ''
   );
+  const [customerName, setCustomerName] = useState<string>(
+    mode === 'edit' && initialBill ? initialBill.customer_name || '' : ''
+  );
+  const [customerPhone, setCustomerPhone] = useState<string>(
+    mode === 'edit' && initialBill ? initialBill.customer_phone || '' : ''
+  );
   const [billAmount, setBillAmount] = useState<string>(
     mode === 'edit' && initialBill ? String(initialBill.bill_amount) : ''
   );
@@ -257,7 +256,7 @@ export const BillForm: React.FC<BillFormProps> = ({
       const parts: string[] = [];
       if (extracted.referenceNumber) parts.push(`Ref: ${extracted.referenceNumber}`);
       if (extracted.billAmount) parts.push(`Price: ${currencyCode} ${extracted.billAmount}`);
-      setScanNotice(`Auto-filled (${parts.join(' · ')}) — Now enter Commission & Save.`);
+      setScanNotice(`Auto-filled (${parts.join(' · ')}) — Now enter Customer Name, Commission & Save.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to scan bill image.');
     } finally {
@@ -271,6 +270,8 @@ export const BillForm: React.FC<BillFormProps> = ({
 
     const parsedSerial = Number(serialNumber);
     const cleanedRef = referenceNumber.trim().replace(/\s+/g, '');
+    const cleanedName = customerName.trim();
+    const cleanedPhone = customerPhone.trim();
     const parsedAmount = Number(billAmount);
     const parsedCommission = Number(commission);
 
@@ -302,11 +303,15 @@ export const BillForm: React.FC<BillFormProps> = ({
         const res = await api.createBill({
           serial_number: parsedSerial,
           reference_number: storedRef,
+          customer_name: cleanedName,
+          customer_phone: cleanedPhone,
           bill_amount: parsedAmount,
           commission: parsedCommission,
           status,
         });
         setReferenceNumber('');
+        setCustomerName('');
+        setCustomerPhone('');
         setBillAmount('');
         setCommission(String(defaultCommission));
         setStatus('UNPAID');
@@ -316,6 +321,8 @@ export const BillForm: React.FC<BillFormProps> = ({
         const res = await api.updateBill(initialBill.id, {
           serial_number: parsedSerial,
           reference_number: cleanedRef,
+          customer_name: cleanedName,
+          customer_phone: cleanedPhone,
           bill_amount: parsedAmount,
           commission: parsedCommission,
           status,
@@ -478,6 +485,51 @@ export const BillForm: React.FC<BillFormProps> = ({
           <p className="mt-1 text-xs text-slate-500">
             Must be unique across records; searchable anytime.
           </p>
+        </div>
+      </div>
+
+      {/* Customer Name & Phone Number (Optional) */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label
+            htmlFor="bill-customer-name"
+            className="mb-1.5 block text-sm font-semibold text-slate-800"
+          >
+            Customer Name (Jis ke naam bill hai)
+          </label>
+          <div className="relative">
+            <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              id="bill-customer-name"
+              type="text"
+              placeholder="e.g. Muhammad Ali"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 text-sm font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label
+            htmlFor="bill-customer-phone"
+            className="mb-1.5 block text-sm font-semibold text-slate-800"
+          >
+            Phone / WhatsApp <span className="text-xs font-normal text-slate-500">(Optional)</span>
+          </label>
+          <div className="relative">
+            <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              id="bill-customer-phone"
+              type="tel"
+              inputMode="tel"
+              maxLength={15}
+              placeholder="03001234567 (Optional)"
+              value={customerPhone}
+              onChange={(e) => setCustomerPhone(e.target.value)}
+              className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 font-mono text-sm font-semibold text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+            />
+          </div>
         </div>
       </div>
 
