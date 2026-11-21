@@ -3,7 +3,7 @@ import { Plus, Search, X } from 'lucide-react';
 import { BillCollection } from '../components/BillTable';
 import { api } from '../lib/api';
 import { formatCurrency } from '../lib/format';
-import type { Bill, MonthlySummary, PaymentStatus } from '../types/bill';
+import type { Bill, MonthlySummary, PaymentAccount, PaymentStatus } from '../types/bill';
 
 interface AllBillsViewProps {
   currencyCode: string;
@@ -32,6 +32,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
 }) => {
   const [search, setSearch] = useState(initialSearch);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'UNPAID' | 'UDHAR'>('ALL');
+  const [accountFilter, setAccountFilter] = useState<'ALL' | PaymentAccount>('ALL');
   const [monthFilter, setMonthFilter] = useState<string>('ALL');
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +51,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
         .listBills({
           search: search.trim() || undefined,
           status: statusFilter,
+          account: accountFilter !== 'ALL' ? accountFilter : undefined,
           month: monthFilter !== 'ALL' ? monthFilter : undefined,
         })
         .then((res) => {
@@ -64,7 +66,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [search, statusFilter, monthFilter, refreshKey]);
+  }, [search, statusFilter, accountFilter, monthFilter, refreshKey]);
 
   const totalAmount = bills.reduce((sum, b) => sum + b.bill_amount, 0);
   const totalUdhar = bills
@@ -92,7 +94,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by Reference #, Customer Name, Phone or Serial #..."
+              placeholder="Search by Reference #, Customer Name, Phone, Account or Serial #..."
               className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/15"
             />
             {search && (
@@ -132,6 +134,19 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
                 </button>
               ))}
             </div>
+
+            <select
+              aria-label="Filter by account"
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value as 'ALL' | PaymentAccount)}
+              className="min-h-[46px] rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 outline-none focus:border-blue-600"
+            >
+              <option value="ALL">All Accounts</option>
+              <option value="CASH">Cash</option>
+              <option value="EASYPAISA">Easypaisa</option>
+              <option value="JAZZCASH">JazzCash</option>
+              <option value="BANK">Bank / Raast</option>
+            </select>
 
             <select
               aria-label="Filter by month"
