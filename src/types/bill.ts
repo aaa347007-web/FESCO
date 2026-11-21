@@ -1,5 +1,7 @@
 export type PaymentStatus = 'PAID' | 'UNPAID';
 
+export type PaymentAccount = 'CASH' | 'EASYPAISA' | 'JAZZCASH' | 'BANK';
+
 export type HistoryAction =
   | 'CREATED'
   | 'MARKED_PAID'
@@ -14,6 +16,7 @@ export interface Bill {
   customer_name?: string;
   customer_phone?: string;
   due_date?: string;
+  payment_account?: PaymentAccount;
   bill_amount: number;
   received_amount?: number;
   remaining_amount?: number;
@@ -59,6 +62,7 @@ export interface DashboardStats {
   urgentUnpaidBills?: Bill[];
   totalUdharAmount?: number;
   udharBillsCount?: number;
+  accountTotals?: Record<PaymentAccount, { count: number; amount: number }>;
 }
 
 export interface MonthlySummary {
