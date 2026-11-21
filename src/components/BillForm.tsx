@@ -1,6 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { Camera, CheckCircle2, Clock, Hash, ImagePlus, Loader2, Phone, RotateCcw, Save, Sparkles, User } from 'lucide-react';
+import {
+  Camera,
+  CheckCircle2,
+  Clock,
+  Hash,
+  ImagePlus,
+  Loader2,
+  Phone,
+  RotateCcw,
+  Save,
+  Sparkles,
+  User,
+} from 'lucide-react';
 import { api } from '../lib/api';
 import { PAK_UTILITY_COMPANIES } from '../lib/pakCompanies';
 import type { Bill, PaymentStatus } from '../types/bill';
@@ -24,6 +36,14 @@ const ELECTRIC_14_DIGIT_COMPANIES = new Set([
   'TESCO',
 ]);
 
+function cleanOcrNumericToken(token: string): string {
+  return token
+    .replace(/[Oo]/g, '0')
+    .replace(/[Il|]/g, '1')
+    .replace(/,/g, '')
+    .trim();
+}
+
 function extractUtilityBillData(
   rawText: string,
   companyId: string
@@ -34,17 +54,27 @@ function extractUtilityBillData(
 
   const is14DigitElectric = ELECTRIC_14_DIGIT_COMPANIES.has((companyId || 'FESCO').toUpperCase());
 
+  // 1. Check WAPDA/DISCO bottom barcode stub line:
+  // e.g. "NOV 26 - 01 13462 0077406 - 000006348 - 23 NOV 26" (tolerating O/o for 0)
   const barcodeLineMatch = text.match(
-    /\b([0-9]{2}\s*[0-9]{5}\s*[0-9]{7})\s*[-–]\s*0*([1-9][0-9]{0,6})\s*[-–]\s*[0-9]{1,2}\s*[A-Z]{3}\s*[0-9]{2}/i
+    /\b([0-9Oo]{2}\s*[0-9Oo]{5}\s*[0-9Oo]{7})\s*[-–—]\s*([0-9Oo]{6,10})\s*[-–—]\s*[0-9]{1,2}\s*[A-Z]{3}\s*[0-9]{2}/i
   );
 
   if (barcodeLineMatch) {
-    referenceNumber = barcodeLineMatch[1].replace(/\s+/g, '');
-    billAmount = barcodeLineMatch[2];
+    const cleanedRef = cleanOcrNumericToken(barcodeLineMatch[1]).replace(/\s+/g, '');
+    const cleanedAmt = cleanOcrNumericToken(barcodeLineMatch[2]).replace(/^0+/, '');
+    if (cleanedRef.length === 14 && !cleanedRef.startsWith('03')) {
+      referenceNumber = cleanedRef;
+    }
+    if (cleanedAmt && Number(cleanedAmt) >= 50) {
+      billAmount = cleanedAmt;
+    }
   }
 
+  // 2. Extract Reference Number (strictly 14 digits for DISCOs)
   if (!referenceNumber && is14DigitElectric) {
-    const spaced14Matches = text.match(/\b([0-9]{2}[\s-]*[0-9]{5}[\s-]*[0-9]{7})(?:\s*[A-Z])?\b/g) || [];
+    const spaced14Matches =
+      text.match(/\b([0-9]{2}[\s-]*[0-9]{5}[\s-]*[0-9]{7})(?:\s*[A-Z])?\b/g) || [];
     for (const candidate of spaced14Matches) {
       const digitsOnly = candidate.replace(/\D/g, '');
       if (digitsOnly.length === 14 && !digitsOnly.startsWith('03')) {
@@ -77,6 +107,7 @@ function extractUtilityBillData(
     }
   }
 
+  // Fallback for Non-14-digit utilities (KE = 13, SNGPL = 11, SSGC = 10, PTCL = 10)
   if (!referenceNumber && !is14DigitElectric) {
     const refMatches = text.match(/\b([0-9]{10,13})\b/g) || [];
     for (const candidate of refMatches) {
@@ -88,16 +119,52 @@ function extractUtilityBillData(
     }
   }
 
+  // 3. Extract Exact Payable Amount (ignoring small 1-2 digit unit/code numbers like "43")
   if (!billAmount) {
-    const withinMatch = text.match(
-      /WITHIN\s+DUE\s+DATE[\s\S]{0,120}?\b([1-9][0-9,]{1,7})\b/i
+    // Priority A: Padded barcode amount "- 000006348 -" anywhere on stub
+    const paddedMatch = text.match(/[-–—]\s*([0-9Oo]{4,6}[1-9][0-9]{1,5})\s*[-–—]/);
+    if (paddedMatch) {
+      const amt = cleanOcrNumericToken(paddedMatch[1]).replace(/^0+/, '');
+      if (Number(amt) >= 50) {
+        billAmount = amt;
+      }
+    }
+  }
+
+  if (!billAmount) {
+    // Priority B: Look specifically after "PAYABLE WITHIN DUE DATE" (filtering out dates like 2026 & tiny numbers < 50)
+    const withinSectionMatch = text.match(
+      /PAYABLE\s+WITHIN\s+DUE\s+DATE([\s\S]{0,180})/i
     );
-    if (withinMatch) {
-      billAmount = withinMatch[1].replace(/,/g, '');
-    } else {
-      const paddedMatch = text.match(/[-–]\s*0{2,}([1-9][0-9]{1,6})\s*[-–]/);
-      if (paddedMatch) {
-        billAmount = paddedMatch[1];
+    if (withinSectionMatch) {
+      const section = withinSectionMatch[1];
+      // Look for numbers like 6,348 or 6348 or Rs. 6348
+      const nums = section.match(/\b([1-9][0-9]{0,2}(?:,[0-9]{3})+|[1-9][0-9]{2,6})\b/g) || [];
+      for (const rawNum of nums) {
+        const val = Number(rawNum.replace(/,/g, ''));
+        // Skip year numbers (2025-2030) and tiny non-bill numbers
+        if (val >= 50 && val <= 5000000 && !(val >= 2024 && val <= 2035)) {
+          billAmount = String(val);
+          break;
+        }
+      }
+    }
+  }
+
+  if (!billAmount) {
+    // Priority C: Generic "WITHIN DUE DATE" or "CURRENT BILL" / "TOTAL PAYABLE"
+    const genericSectionMatch = text.match(
+      /(?:WITHIN\s+DUE\s+DATE|PAYABLE\s+BY\s+DUE\s+DATE|TOTAL\s+PAYABLE)([\s\S]{0,150})/i
+    );
+    if (genericSectionMatch) {
+      const nums =
+        genericSectionMatch[1].match(/\b([1-9][0-9]{0,2}(?:,[0-9]{3})+|[1-9][0-9]{2,6})\b/g) || [];
+      for (const rawNum of nums) {
+        const val = Number(rawNum.replace(/,/g, ''));
+        if (val >= 50 && val <= 5000000 && !(val >= 2024 && val <= 2035)) {
+          billAmount = String(val);
+          break;
+        }
       }
     }
   }
@@ -111,7 +178,7 @@ function fileToResizedBase64(file: File): Promise<string> {
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const maxDim = 1600;
+        const maxDim = 1800;
         let { width, height } = img;
         if (width > maxDim || height > maxDim) {
           if (width > height) {
@@ -131,7 +198,7 @@ function fileToResizedBase64(file: File): Promise<string> {
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
         resolve(dataUrl.split(',')[1]);
       };
       img.onerror = () => reject(new Error('Invalid image file'));
@@ -172,14 +239,14 @@ export const BillForm: React.FC<BillFormProps> = ({
   const [referenceNumber, setReferenceNumber] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.reference_number : prefillReference || ''
   );
+  const [billAmount, setBillAmount] = useState<string>(
+    mode === 'edit' && initialBill ? String(initialBill.bill_amount) : ''
+  );
   const [customerName, setCustomerName] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.customer_name || '' : ''
   );
   const [customerPhone, setCustomerPhone] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.customer_phone || '' : ''
-  );
-  const [billAmount, setBillAmount] = useState<string>(
-    mode === 'edit' && initialBill ? String(initialBill.bill_amount) : ''
   );
   const [commission, setCommission] = useState<string>(
     mode === 'edit' && initialBill ? String(initialBill.commission) : String(defaultCommission)
@@ -242,7 +309,9 @@ export const BillForm: React.FC<BillFormProps> = ({
       const extracted = extractUtilityBillData(recognizedText, selectedCompany);
 
       if (!extracted.referenceNumber && !extracted.billAmount) {
-        setError('Could not read 14-digit Reference Number or Price clearly. Please take a sharper photo of the bill.');
+        setError(
+          'Could not read Reference Number or Bill Amount clearly. Please take a sharper photo.'
+        );
         return;
       }
 
@@ -255,8 +324,8 @@ export const BillForm: React.FC<BillFormProps> = ({
 
       const parts: string[] = [];
       if (extracted.referenceNumber) parts.push(`Ref: ${extracted.referenceNumber}`);
-      if (extracted.billAmount) parts.push(`Price: ${currencyCode} ${extracted.billAmount}`);
-      setScanNotice(`Auto-filled (${parts.join(' · ')}) — Now enter Customer Name, Commission & Save.`);
+      if (extracted.billAmount) parts.push(`Amount: ${currencyCode} ${extracted.billAmount}`);
+      setScanNotice(`Scanned (${parts.join(' · ')}) — Verify Amount, enter Name & Save.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to scan bill image.');
     } finally {
@@ -362,7 +431,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-xs font-bold text-blue-900">
             <Sparkles className="h-4 w-4 shrink-0 text-blue-700" />
-            <span>Auto-Fill Reference # & Price from Bill Photo</span>
+            <span>Auto-Fill Reference # & Amount from Bill Photo</span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex">
             <button
@@ -402,32 +471,32 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       )}
 
-      {/* Utility Company Selector (in Create mode) */}
-      {mode === 'create' && (
-        <div>
-          <label
-            htmlFor="bill-company"
-            className="mb-1.5 block text-sm font-semibold text-slate-800"
-          >
-            Utility Company
-          </label>
-          <select
-            id="bill-company"
-            value={selectedCompany}
-            onChange={(e) => setSelectedCompany(e.target.value)}
-            className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
-          >
-            {PAK_UTILITY_COMPANIES.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
+      {/* 1. Utility Company & Serial Number */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
+        {mode === 'create' && (
+          <div>
+            <label
+              htmlFor="bill-company"
+              className="mb-1.5 block text-sm font-semibold text-slate-800"
+            >
+              Utility Company
+            </label>
+            <select
+              id="bill-company"
+              value={selectedCompany}
+              onChange={(e) => setSelectedCompany(e.target.value)}
+              className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-bold text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+            >
+              {PAK_UTILITY_COMPANIES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className={mode === 'edit' ? 'sm:col-span-2' : ''}>
           <label
             htmlFor="bill-serial"
             className="mb-1.5 block text-sm font-semibold text-slate-800"
@@ -460,11 +529,11 @@ export const BillForm: React.FC<BillFormProps> = ({
               </button>
             )}
           </div>
-          <p className="mt-1 text-xs text-slate-500">
-            Auto-generated sequentially; editable anytime.
-          </p>
         </div>
+      </div>
 
+      {/* 2. Scanned Fields Together: Reference Number & Bill Amount */}
+      <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 sm:grid-cols-2">
         <div>
           <label
             htmlFor="bill-ref"
@@ -480,15 +549,33 @@ export const BillForm: React.FC<BillFormProps> = ({
             value={referenceNumber}
             onChange={(e) => setReferenceNumber(e.target.value)}
             required
-            className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3.5 font-mono text-sm font-semibold text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+            className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3.5 font-mono text-sm font-bold text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
           />
-          <p className="mt-1 text-xs text-slate-500">
-            Must be unique across records; searchable anytime.
-          </p>
+        </div>
+
+        <div>
+          <label
+            htmlFor="bill-amount"
+            className="mb-1.5 block text-sm font-semibold text-slate-800"
+          >
+            Bill Amount ({currencyCode})
+          </label>
+          <input
+            id="bill-amount"
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            placeholder="0"
+            value={billAmount}
+            onChange={(e) => setBillAmount(e.target.value)}
+            required
+            className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3.5 font-mono text-base font-extrabold text-slate-900 tabular-nums placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+          />
         </div>
       </div>
 
-      {/* Customer Name & Phone Number (Optional) */}
+      {/* 3. Customer Name & Phone Number (Optional) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label
@@ -533,28 +620,8 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
+      {/* 4. Commission & Payment Status */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label
-            htmlFor="bill-amount"
-            className="mb-1.5 block text-sm font-semibold text-slate-800"
-          >
-            Bill Amount ({currencyCode})
-          </label>
-          <input
-            id="bill-amount"
-            type="number"
-            min={0}
-            step="any"
-            inputMode="decimal"
-            placeholder="0"
-            value={billAmount}
-            onChange={(e) => setBillAmount(e.target.value)}
-            required
-            className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3.5 font-mono text-base font-bold text-slate-900 tabular-nums placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
-          />
-        </div>
-
         <div>
           <label
             htmlFor="bill-commission"
@@ -591,41 +658,41 @@ export const BillForm: React.FC<BillFormProps> = ({
             ))}
           </div>
         </div>
-      </div>
 
-      <div>
-        <span className="mb-2 block text-sm font-semibold text-slate-800">Payment Status</span>
-        <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
-          <button
-            type="button"
-            onClick={() => setStatus('PAID')}
-            className={`flex min-h-[46px] items-center justify-center gap-2 rounded-lg text-sm font-bold transition ${
-              status === 'PAID'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-white hover:text-slate-900'
-            }`}
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            <span>Paid</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatus('UNPAID')}
-            className={`flex min-h-[46px] items-center justify-center gap-2 rounded-lg text-sm font-bold transition ${
-              status === 'UNPAID'
-                ? 'bg-amber-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-white hover:text-slate-900'
-            }`}
-          >
-            <Clock className="h-4 w-4" />
-            <span>Unpaid</span>
-          </button>
+        <div>
+          <span className="mb-1.5 block text-sm font-semibold text-slate-800">Payment Status</span>
+          <div className="grid grid-cols-2 gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
+            <button
+              type="button"
+              onClick={() => setStatus('PAID')}
+              className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-lg text-sm font-bold transition ${
+                status === 'PAID'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-white hover:text-slate-900'
+              }`}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              <span>Paid</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatus('UNPAID')}
+              className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-lg text-sm font-bold transition ${
+                status === 'UNPAID'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-white hover:text-slate-900'
+              }`}
+            >
+              <Clock className="h-4 w-4" />
+              <span>Unpaid</span>
+            </button>
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">
+            {status === 'PAID'
+              ? 'Commission added immediately to Total Earned.'
+              : 'Commission stays pending until marked Paid.'}
+          </p>
         </div>
-        <p className="mt-1.5 text-xs text-slate-500">
-          {status === 'PAID'
-            ? 'Commission will be added immediately to Total Earned Commission.'
-            : 'Commission remains pending until this bill is marked Paid.'}
-        </p>
       </div>
 
       <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
