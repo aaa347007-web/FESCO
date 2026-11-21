@@ -35,14 +35,20 @@ export const BillCard: React.FC<BillListItemProps> = ({
   const isOverdue = !isPaid && Boolean(bill.due_date && bill.due_date < todayIso);
   const isDueToday = !isPaid && bill.due_date === todayIso;
 
+  const received = isPaid ? bill.bill_amount : Math.max(0, Number(bill.received_amount || 0));
+  const remaining = isPaid ? 0 : Math.max(0, bill.bill_amount - received);
+  const isPartialUdhar = !isPaid && received > 0 && remaining > 0;
+
   return (
     <div
       className={`rounded-2xl border bg-white p-4 transition ${
         isOverdue
           ? 'border-red-300 bg-red-50/20'
-          : isDueToday
-            ? 'border-amber-300 bg-amber-50/20'
-            : 'border-slate-200 hover:border-blue-200'
+          : isPartialUdhar
+            ? 'border-orange-300 bg-orange-50/20'
+            : isDueToday
+              ? 'border-amber-300 bg-amber-50/20'
+              : 'border-slate-200 hover:border-blue-200'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -102,7 +108,9 @@ export const BillCard: React.FC<BillListItemProps> = ({
           className={`inline-flex min-h-[44px] min-w-[104px] shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition active:scale-[0.98] disabled:opacity-60 ${
             isPaid
               ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-              : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+              : isPartialUdhar
+                ? 'border border-orange-300 bg-orange-50 text-orange-800 hover:bg-orange-100'
+                : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
           }`}
         >
           {isPaid ? (
@@ -113,7 +121,7 @@ export const BillCard: React.FC<BillListItemProps> = ({
           ) : (
             <>
               <Clock className="h-4 w-4" />
-              <span>Unpaid</span>
+              <span>{isPartialUdhar ? 'Clear Udhar' : 'Unpaid'}</span>
             </>
           )}
         </button>
@@ -137,6 +145,17 @@ export const BillCard: React.FC<BillListItemProps> = ({
           </div>
         </div>
       </div>
+
+      {isPartialUdhar && (
+        <div className="mt-2.5 flex items-center justify-between rounded-xl border border-orange-200 bg-orange-50/80 px-3 py-2 text-xs font-bold">
+          <span className="text-emerald-800">
+            Jama: {formatCurrency(received, currencyCode)}
+          </span>
+          <span className="text-red-700">
+            Udhar Baqaya: {formatCurrency(remaining, currencyCode)}
+          </span>
+        </div>
+      )}
 
       {isPaid && bill.paid_at && (
         <div className="mt-2 text-xs text-emerald-700">
