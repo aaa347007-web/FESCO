@@ -76,7 +76,7 @@ export const BillCollection: React.FC<BillTableProps> = ({
                 <th className="px-4 py-3.5">Bill Reference #</th>
                 <th className="px-4 py-3.5">Customer & Phone</th>
                 <th className="px-4 py-3.5">Due Date</th>
-                <th className="px-4 py-3.5 text-right">Bill Amount</th>
+                <th className="px-4 py-3.5 text-right">Bill & Udhar</th>
                 <th className="px-4 py-3.5 text-right">Commission</th>
                 <th className="px-4 py-3.5">Payment Status</th>
                 <th className="px-4 py-3.5">Added Date & Time</th>
@@ -90,6 +90,12 @@ export const BillCollection: React.FC<BillTableProps> = ({
                 const busy = togglingId === bill.id;
                 const isOverdue = !isPaid && Boolean(bill.due_date && bill.due_date < todayIso);
                 const isDueToday = !isPaid && bill.due_date === todayIso;
+                const received = isPaid
+                  ? bill.bill_amount
+                  : Math.max(0, Number(bill.received_amount || 0));
+                const remaining = isPaid ? 0 : Math.max(0, bill.bill_amount - received);
+                const isPartialUdhar = !isPaid && received > 0 && remaining > 0;
+
                 return (
                   <tr key={bill.id} className="transition hover:bg-blue-50/35">
                     <td className="px-4 py-3 font-mono font-bold text-blue-700 tabular-nums whitespace-nowrap">
@@ -131,8 +137,15 @@ export const BillCollection: React.FC<BillTableProps> = ({
                         <span className="text-xs text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                      {formatCurrency(bill.bill_amount, currencyCode)}
+                    <td className="px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap">
+                      <div className="font-semibold text-slate-900">
+                        {formatCurrency(bill.bill_amount, currencyCode)}
+                      </div>
+                      {isPartialUdhar && (
+                        <div className="text-[11px] font-bold text-red-600">
+                          Udhar: {formatCurrency(remaining, currencyCode)}
+                        </div>
+                      )}
                     </td>
                     <td
                       className={`px-4 py-3 text-right font-mono font-bold tabular-nums whitespace-nowrap ${
@@ -150,7 +163,9 @@ export const BillCollection: React.FC<BillTableProps> = ({
                         className={`inline-flex min-h-[38px] min-w-[96px] items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition active:scale-[0.98] disabled:opacity-60 ${
                           isPaid
                             ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                            : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                            : isPartialUdhar
+                              ? 'border border-orange-300 bg-orange-50 text-orange-800 hover:bg-orange-100'
+                              : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
                         }`}
                       >
                         {isPaid ? (
@@ -161,7 +176,7 @@ export const BillCollection: React.FC<BillTableProps> = ({
                         ) : (
                           <>
                             <Clock className="h-3.5 w-3.5" />
-                            <span>Unpaid</span>
+                            <span>{isPartialUdhar ? 'Clear Udhar' : 'Unpaid'}</span>
                           </>
                         )}
                       </button>
