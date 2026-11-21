@@ -31,7 +31,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
   onViewHistory,
 }) => {
   const [search, setSearch] = useState(initialSearch);
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'UNPAID'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'UNPAID' | 'UDHAR'>('ALL');
   const [monthFilter, setMonthFilter] = useState<string>('ALL');
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +67,13 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
   }, [search, statusFilter, monthFilter, refreshKey]);
 
   const totalAmount = bills.reduce((sum, b) => sum + b.bill_amount, 0);
+  const totalUdhar = bills
+    .filter((b) => b.status !== 'PAID')
+    .reduce((sum, b) => {
+      const rec = Math.max(0, Number(b.received_amount || 0));
+      const rem = Math.max(0, b.bill_amount - rec);
+      return rec > 0 && rem > 0 ? sum + rem : sum;
+    }, 0);
   const earnedCommission = bills
     .filter((b) => b.status === 'PAID')
     .reduce((sum, b) => sum + b.commission, 0);
@@ -85,7 +92,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by FESCO Reference Number or Serial # (all months & years)..."
+              placeholder="Search by Reference #, Customer Name, Phone or Serial #..."
               className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/15"
             />
             {search && (
@@ -102,18 +109,26 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
 
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-              {(['ALL', 'PAID', 'UNPAID'] as const).map((tab) => (
+              {(['ALL', 'PAID', 'UNPAID', 'UDHAR'] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   onClick={() => setStatusFilter(tab)}
-                  className={`min-h-[38px] rounded-lg px-3.5 text-xs font-bold transition whitespace-nowrap ${
+                  className={`min-h-[38px] rounded-lg px-3 text-xs font-bold transition whitespace-nowrap ${
                     statusFilter === tab
-                      ? 'bg-blue-700 text-white shadow-xs'
+                      ? tab === 'UDHAR'
+                        ? 'bg-orange-600 text-white shadow-xs'
+                        : 'bg-blue-700 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {tab === 'ALL' ? 'All' : tab === 'PAID' ? 'Paid' : 'Unpaid'}
+                  {tab === 'ALL'
+                    ? 'All'
+                    : tab === 'PAID'
+                      ? 'Paid'
+                      : tab === 'UNPAID'
+                        ? 'Unpaid'
+                        : 'Udhar'}
                 </button>
               ))}
             </div>
@@ -134,7 +149,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
           </div>
         </div>
 
-        {/* Unboxed Summary Strip */}
+        {/* Summary Strip */}
         <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-slate-100 pt-3 text-xs text-slate-600 tabular-nums">
           <span>
             Showing <strong className="text-slate-900">{bills.length}</strong> bills
@@ -145,6 +160,14 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
               {formatCurrency(totalAmount, currencyCode)}
             </strong>
           </span>
+          {totalUdhar > 0 && (
+            <span>
+              Udhar Baqaya:{' '}
+              <strong className="font-mono text-red-600">
+                {formatCurrency(totalUdhar, currencyCode)}
+              </strong>
+            </span>
+          )}
           <span>
             Earned Commission:{' '}
             <strong className="font-mono text-emerald-700">
@@ -179,7 +202,7 @@ export const AllBillsView: React.FC<AllBillsViewProps> = ({
           emptyDescription={
             search
               ? `No bill matched "${search}" across any month or year.`
-              : 'Add a new FESCO bill to populate your shop ledger.'
+              : 'Add a new utility bill to populate your shop ledger.'
           }
           emptyAction={
             !search ? (
