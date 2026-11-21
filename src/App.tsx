@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ArrowDownToLine,
   CalendarDays,
   CheckCircle2,
   Cloud,
@@ -17,7 +18,9 @@ import {
   PlusCircle,
   Search,
   Settings as SettingsIcon,
+  Sparkles,
   Store,
+  X,
   Zap,
 } from 'lucide-react';
 import { BillHistoryModal } from './components/BillHistoryModal';
@@ -49,6 +52,10 @@ import { ReportsBackupView } from './views/ReportsBackupView';
 import { SettingsView } from './views/SettingsView';
 
 type NavTab = 'dashboard' | 'add' | 'bills' | 'months' | 'reports' | 'settings';
+
+const CURRENT_BUILD_NUMBER = Number(import.meta.env.VITE_APP_BUILD_NUMBER || 0);
+const GITHUB_LATEST_RELEASE_API =
+  'https://api.github.com/repos/aaa347007-web/FESCO/releases/latest';
 
 const NAV_ITEMS: {
   id: NavTab;
@@ -102,6 +109,14 @@ export default function App() {
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [historyBillId, setHistoryBillId] = useState<number | null>(null);
 
+  // Automatic GitHub Update State
+  const [availableUpdate, setAvailableUpdate] = useState<{
+    version: string;
+    downloadUrl: string;
+    notes: string;
+  } | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+
   // Auth & Cloud Sync States
   const [authChecking, setAuthChecking] = useState(true);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
@@ -110,7 +125,7 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const isRestoringRef = useRef(false);
 
-  // Full-Screen Welcome Gate Form States (Default to Sign Up for new users)
+  // Full-Screen Welcome Gate Form States
   const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup');
   const [authShopName, setAuthShopName] = useState('');
   const [authPhone, setAuthPhone] = useState('');
@@ -128,6 +143,48 @@ export default function App() {
 
   useEffect(() => {
     initAdMobAndShowBanner();
+  }, []);
+
+  // Automatic Check for New GitHub Release APK
+  useEffect(() => {
+    if (!CURRENT_BUILD_NUMBER) return;
+    let cancelled = false;
+
+    const checkForAppUpdate = async () => {
+      try {
+        const res = await fetch(GITHUB_LATEST_RELEASE_API, {
+          headers: { Accept: 'application/vnd.github+json' },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const tag = String(data.tag_name || ''); // e.g. "v1.0.28"
+        const match = tag.match(/(\d+)$/);
+        const latestBuild = match ? Number(match[1]) : 0;
+
+        const assets = Array.isArray(data.assets) ? data.assets : [];
+        const apkAsset = assets.find((a: { name?: string }) =>
+          String(a.name || '').toLowerCase().endsWith('.apk')
+        );
+
+        if (!cancelled && latestBuild > CURRENT_BUILD_NUMBER && apkAsset?.browser_download_url) {
+          setAvailableUpdate({
+            version: tag,
+            downloadUrl: apkAsset.browser_download_url,
+            notes:
+              typeof data.body === 'string' && data.body.trim()
+                ? data.body.trim()
+                : 'Naye features aur behtari shamil kar di gayi hain.',
+          });
+        }
+      } catch {
+        // Offline or network busy — silently ignore
+      }
+    };
+
+    checkForAppUpdate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -335,7 +392,6 @@ export default function App() {
     return (
       <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-4 py-8 text-slate-900">
         <div className="mx-auto w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
-          {/* Top Brand Header */}
           <div className="bg-blue-700 px-6 py-6 text-center text-white">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
               <Zap className="h-6 w-6" />
@@ -347,7 +403,6 @@ export default function App() {
           </div>
 
           <div className="p-6">
-            {/* Sign Up / Sign In Switcher */}
             <div className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
               <button
                 type="button"
@@ -504,6 +559,54 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Automatic GitHub App Update Banner / Modal */}
+      {availableUpdate && !updateDismissed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-sm overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-5 py-5 text-white">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[11px] font-extrabold">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>NEW UPDATE ({availableUpdate.version})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setUpdateDismissed(true)}
+                  aria-label="Close update popup"
+                  className="rounded-lg p-1 text-white/80 hover:bg-white/10 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <h2 className="mt-3 text-lg font-extrabold">Pak Bill Manager Update</h2>
+              <p className="mt-1 text-xs text-blue-100">{availableUpdate.notes}</p>
+            </div>
+
+            <div className="space-y-3 p-5">
+              <p className="text-xs leading-relaxed text-slate-600">
+                Naya version install karne se aap ka purana hisab aur login bilkul mehfooz rahega.
+              </p>
+              <a
+                href={availableUpdate.downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700"
+              >
+                <ArrowDownToLine className="h-4 w-4" />
+                <span>Download & Update Now</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setUpdateDismissed(true)}
+                className="h-10 w-full rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Desktop Left Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="flex h-16 items-center gap-2.5 border-b border-slate-200 px-5">
@@ -633,7 +736,7 @@ export default function App() {
               type="text"
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
-              placeholder="Search Reference # or Serial # and press Enter..."
+              placeholder="Search Reference #, Customer Name or Serial #..."
               className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:bg-white"
             />
           </form>
