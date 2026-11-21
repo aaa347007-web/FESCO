@@ -13,6 +13,7 @@ import {
   Save,
   Sparkles,
   User,
+  Wallet,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PAK_UTILITY_COMPANIES } from '../lib/pakCompanies';
@@ -80,8 +81,6 @@ function extractUtilityBillData(
 
   const is14DigitElectric = ELECTRIC_14_DIGIT_COMPANIES.has((companyId || 'FESCO').toUpperCase());
 
-  // 1. Check WAPDA/DISCO bottom barcode stub line:
-  // e.g. "NOV 26 - 01 13462 0077406 - 000006348 - 23 NOV 26"
   const barcodeLineMatch = text.match(
     /\b([0-9Oo]{2}\s*[0-9Oo]{5}\s*[0-9Oo]{7})\s*[-–—]\s*([0-9Oo]{6,10})\s*[-–—]\s*([0-9]{1,2})\s*([A-Z]{3})\s*([0-9]{2,4})/i
   );
@@ -105,7 +104,6 @@ function extractUtilityBillData(
     }
   }
 
-  // 2. Extract Reference Number (strictly 14 digits for DISCOs)
   if (!referenceNumber && is14DigitElectric) {
     const spaced14Matches =
       text.match(/\b([0-9]{2}[\s-]*[0-9]{5}[\s-]*[0-9]{7})(?:\s*[A-Z])?\b/g) || [];
@@ -152,7 +150,6 @@ function extractUtilityBillData(
     }
   }
 
-  // 3. Extract Exact Payable Amount
   if (!billAmount) {
     const paddedMatch = text.match(/[-–—]\s*([0-9Oo]{4,6}[1-9][0-9]{1,5})\s*[-–—]/);
     if (paddedMatch) {
@@ -195,7 +192,6 @@ function extractUtilityBillData(
     }
   }
 
-  // 4. Fallback Due Date near "DUE DATE" label (e.g. "23 NOV 26" or "23-NOV-2026")
   if (!dueDate) {
     const dueMatch = text.match(
       /DUE\s+DATE[\s\S]{0,80}?\b([0-9]{1,2})[\s/-]+([A-Z]{3})[\s/-]+([0-9]{2,4})\b/i
@@ -278,6 +274,15 @@ export const BillForm: React.FC<BillFormProps> = ({
   const [billAmount, setBillAmount] = useState<string>(
     mode === 'edit' && initialBill ? String(initialBill.bill_amount) : ''
   );
+  const [receivedAmount, setReceivedAmount] = useState<string>(
+    mode === 'edit' && initialBill
+      ? String(
+          initialBill.status === 'PAID'
+            ? initialBill.bill_amount
+            : initialBill.received_amount ?? ''
+        )
+      : ''
+  );
   const [customerName, setCustomerName] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.customer_name || '' : ''
   );
@@ -324,6 +329,32 @@ export const BillForm: React.FC<BillFormProps> = ({
       setCommission(String(defaultCommission));
     }
   }, [defaultCommission, mode, billAmount]);
+
+  const parsedAmountNum = Math.max(0, Number(billAmount) || 0);
+  const parsedReceivedNum =
+    status === 'PAID'
+      ? parsedAmountNum
+      : Math.min(parsedAmountNum, Math.max(0, Number(receivedAmount) || 0));
+  const remainingUdharNum = Math.max(0, parsedAmountNum - parsedReceivedNum);
+
+  const handleReceivedChange = (val: string) => {
+    setReceivedAmount(val);
+    const num = Number(val) || 0;
+    if (parsedAmountNum > 0 && num >= parsedAmountNum) {
+      setStatus('PAID');
+    } else if (num > 0 && num < parsedAmountNum) {
+      setStatus('UNPAID');
+    }
+  };
+
+  const handleStatusSelect = (next: PaymentStatus) => {
+    setStatus(next);
+    if (next === 'PAID' && parsedAmountNum > 0) {
+      setReceivedAmount(String(parsedAmountNum));
+    } else if (next === 'UNPAID' && Number(receivedAmount) >= parsedAmountNum) {
+      setReceivedAmount('');
+    }
+  };
 
   const handleBillImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -410,6 +441,12 @@ export const BillForm: React.FC<BillFormProps> = ({
         ? `${selectedCompany}: ${cleanedRef}`
         : cleanedRef;
 
+    const finalReceived =
+      status === 'PAID'
+        ? parsedAmount
+        : Math.min(parsedAmount, Math.max(0, Number(receivedAmount) || 0));
+    const finalStatus: PaymentStatus = finalReceived >= parsedAmount ? 'PAID' : status;
+
     setSubmitting(true);
     try {
       if (mode === 'create') {
@@ -420,14 +457,16 @@ export const BillForm: React.FC<BillFormProps> = ({
           customer_phone: cleanedPhone,
           due_date: cleanedDueDate,
           bill_amount: parsedAmount,
+          received_amount: finalReceived,
           commission: parsedCommission,
-          status,
+          status: finalStatus,
         });
         setReferenceNumber('');
         setCustomerName('');
         setCustomerPhone('');
         setDueDate('');
         setBillAmount('');
+        setReceivedAmount('');
         setCommission(String(defaultCommission));
         setStatus('UNPAID');
         setScanNotice(null);
@@ -440,8 +479,9 @@ export const BillForm: React.FC<BillFormProps> = ({
           customer_phone: cleanedPhone,
           due_date: cleanedDueDate,
           bill_amount: parsedAmount,
+          received_amount: finalReceived,
           commission: parsedCommission,
-          status,
+          status: finalStatus,
         });
         onSuccess(res.bill);
       }
@@ -456,7 +496,6 @@ export const BillForm: React.FC<BillFormProps> = ({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-      {/* Hidden File Inputs for Camera & Gallery */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -579,7 +618,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 2. Scanned Fields Together: Reference Number & Bill Amount */}
+      {/* 2. Reference Number & Bill Amount */}
       <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 sm:grid-cols-2">
         <div>
           <label
@@ -605,7 +644,7 @@ export const BillForm: React.FC<BillFormProps> = ({
             htmlFor="bill-amount"
             className="mb-1.5 block text-sm font-semibold text-slate-800"
           >
-            Bill Amount ({currencyCode})
+            Total Bill Amount ({currencyCode})
           </label>
           <input
             id="bill-amount"
@@ -622,7 +661,70 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 3. Due Date & Customer Name */}
+      {/* 3. Udhar / Partial Payment Box (Received vs Remaining Balance) */}
+      <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-3.5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label
+              htmlFor="bill-received-amount"
+              className="mb-1.5 block text-sm font-semibold text-slate-800"
+            >
+              Received Amount <span className="text-xs font-normal text-slate-500">(Jama Shuda)</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Wallet className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-600" />
+                <input
+                  id="bill-received-amount"
+                  type="number"
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="0 (Agar kuch nahi diya)"
+                  value={receivedAmount}
+                  onChange={(e) => handleReceivedChange(e.target.value)}
+                  className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 font-mono text-sm font-bold text-emerald-700 tabular-nums placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600"
+                />
+              </div>
+              {parsedAmountNum > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleReceivedChange(String(parsedAmountNum))}
+                  className="min-h-[46px] shrink-0 rounded-xl border border-emerald-300 bg-emerald-50 px-3 text-xs font-extrabold text-emerald-800 hover:bg-emerald-100"
+                >
+                  Full
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2.5">
+            <span className="text-xs font-semibold text-slate-500">
+              Remaining Balance (Baqaya Udhar)
+            </span>
+            <span
+              className={`mt-0.5 font-mono text-lg font-extrabold tabular-nums ${
+                remainingUdharNum > 0 && parsedReceivedNum > 0
+                  ? 'text-red-600'
+                  : remainingUdharNum === 0 && parsedAmountNum > 0
+                    ? 'text-emerald-700'
+                    : 'text-slate-800'
+              }`}
+            >
+              {currencyCode} {remainingUdharNum.toLocaleString()}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {remainingUdharNum > 0 && parsedReceivedNum > 0
+                ? 'Partial payment — Baqaya Udhar mein save hoga'
+                : remainingUdharNum === 0 && parsedAmountNum > 0
+                  ? 'Mukammal adaigi ho gayi'
+                  : 'Customer ne abhi raqam nahi di'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Due Date & Customer Name */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label
@@ -664,7 +766,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 4. Phone Number (Optional) */}
+      {/* 5. Phone Number (Optional) */}
       <div>
         <label
           htmlFor="bill-customer-phone"
@@ -687,7 +789,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 5. Commission & Payment Status */}
+      {/* 6. Commission & Payment Status */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label
@@ -731,7 +833,7 @@ export const BillForm: React.FC<BillFormProps> = ({
           <div className="grid grid-cols-2 gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-1.5">
             <button
               type="button"
-              onClick={() => setStatus('PAID')}
+              onClick={() => handleStatusSelect('PAID')}
               className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-lg text-sm font-bold transition ${
                 status === 'PAID'
                   ? 'bg-emerald-600 text-white shadow-sm'
@@ -743,7 +845,7 @@ export const BillForm: React.FC<BillFormProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setStatus('UNPAID')}
+              onClick={() => handleStatusSelect('UNPAID')}
               className={`flex min-h-[42px] items-center justify-center gap-1.5 rounded-lg text-sm font-bold transition ${
                 status === 'UNPAID'
                   ? 'bg-amber-600 text-white shadow-sm'
@@ -751,13 +853,15 @@ export const BillForm: React.FC<BillFormProps> = ({
               }`}
             >
               <Clock className="h-4 w-4" />
-              <span>Unpaid</span>
+              <span>{parsedReceivedNum > 0 && remainingUdharNum > 0 ? 'Udhar' : 'Unpaid'}</span>
             </button>
           </div>
           <p className="mt-1.5 text-xs text-slate-500">
             {status === 'PAID'
-              ? 'Commission added immediately to Total Earned.'
-              : 'Commission stays pending until marked Paid.'}
+              ? 'Full amount received; commission added immediately.'
+              : parsedReceivedNum > 0 && remainingUdharNum > 0
+                ? `Udhar Baqaya: ${currencyCode} ${remainingUdharNum.toLocaleString()}`
+                : 'Commission stays pending until marked Paid.'}
           </p>
         </div>
       </div>
