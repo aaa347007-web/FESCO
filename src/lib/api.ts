@@ -34,6 +34,16 @@ function formatMonthText(monthKey) {
   return `${names[Number(m) - 1] || m} ${y}`;
 }
 
+function computeBalances(billAmount, receivedRaw, status) {
+  const total = Math.max(0, Number(billAmount || 0));
+  if (status === 'PAID') {
+    return { received_amount: total, remaining_amount: 0 };
+  }
+  const received = Math.min(total, Math.max(0, Number(receivedRaw || 0)));
+  const remaining = Math.max(0, total - received);
+  return { received_amount: received, remaining_amount: remaining };
+}
+
 function readBills() {
   try {
     return JSON.parse(localStorage.getItem(BILLS_KEY) || '[]');
@@ -89,6 +99,20 @@ export const api = {
       .filter((b) => b.due_date && b.due_date <= soonLimit)
       .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
 
+    const udharBills = unpaid.filter((b) => {
+      const { received_amount, remaining_amount } = computeBalances(
+        b.bill_amount,
+        b.received_amount,
+        b.status
+      );
+      return received_amount > 0 && remaining_amount > 0;
+    });
+
+    const totalUdharAmount = udharBills.reduce((sum, b) => {
+      const { remaining_amount } = computeBalances(b.bill_amount, b.received_amount, b.status);
+      return sum + remaining_amount;
+    }, 0);
+
     return {
       totalBills: bills.length,
       totalBillAmount: bills.reduce((s, b) => s + Number(b.bill_amount || 0), 0),
@@ -102,12 +126,26 @@ export const api = {
       nextSerialNumber: maxSerial + 1,
       recentBills: recent.slice(0, 10),
       urgentUnpaidBills,
+      totalUdharAmount,
+      udharBillsCount: udharBills.length,
     };
   },
 
   async listBills(params = {}) {
     let bills = readBills();
-    if (params.status && params.status !== 'ALL') bills = bills.filter((b) => b.status === params.status);
+    if (params.status === 'UDHAR') {
+      bills = bills.filter((b) => {
+        if (b.status === 'PAID') return false;
+        const { received_amount, remaining_amount } = computeBalances(
+          b.bill_amount,
+          b.received_amount,
+          b.status
+        );
+        return received_amount > 0 && remaining_amount > 0;
+      });
+    } else if (params.status && params.status !== 'ALL') {
+      bills = bills.filter((b) => b.status === params.status);
+    }
     if (params.month) bills = bills.filter((b) => getMonthStr(b.bill_date || b.created_at) === params.month);
     if (params.date) bills = bills.filter((b) => (b.bill_date || b.created_at || '').startsWith(params.date));
     if (params.fromDate) bills = bills.filter((b) => (b.bill_date || b.created_at || '').slice(0, 10) >= params.fromDate);
@@ -133,15 +171,29 @@ export const api = {
       throw new Error(`Reference number ${ref} already exists.`);
     }
     const now = new Date().toISOString();
-    const status = data.status === 'PAID' ? 'PAID' : 'UNPAID';
+    const billAmount = Number(data.bill_amount || 0);
+    let status = data.status === 'PAID' ? 'PAID' : 'UNPAID';
+    const rawReceived =
+      data.received_amount !== undefined && data.received_amount !== ''
+        ? Number(data.received_amount)
+        : status === 'PAID'
+          ? billAmount
+          : 0;
+    if (rawReceived >= billAmount && billAmount > 0) {
+      status = 'PAID';
+    }
+    const { received_amount, remaining_amount } = computeBalances(billAmount, rawReceived, status);
     const commission = Number(data.commission ?? readSettings().default_commission);
+
     const bill = {
       id: Date.now(),
       serial_number: Number(data.serial_number || bills.length + 1),
       reference_number: ref,
       customer_name: String(data.customer_name || '').trim(),
       customer_phone: String(data.customer_phone || '').trim(),
-      bill_amount: Number(data.bill_amount || 0),
+      bill_amount: billAmount,
+      received_amount,
+      remaining_amount,
       commission,
       status,
       bill_date: data.bill_date || getTodayStr(),
@@ -162,7 +214,10 @@ export const api = {
       old_status: null,
       new_status: status,
       commission_delta: status === 'PAID' ? commission : 0,
-      note: `Bill added (${status})`,
+      note:
+        remaining_amount > 0 && received_amount > 0
+          ? `Bill added (Received ${received_amount}, Udhar ${remaining_amount})`
+          : `Bill added (${status})`,
     });
     return { bill };
   },
@@ -172,9 +227,23 @@ export const api = {
     const idx = bills.findIndex((b) => b.id === id);
     if (idx === -1) throw new Error('Bill not found.');
     const old = bills[idx];
-    const status = data.status || old.status;
+    const billAmount =
+      data.bill_amount !== undefined ? Number(data.bill_amount) : Number(old.bill_amount || 0);
+    let status = data.status || old.status;
+    const rawReceived =
+      data.received_amount !== undefined
+        ? Number(data.received_amount)
+        : status === 'PAID'
+          ? billAmount
+          : Number(old.received_amount || 0);
+    if (rawReceived >= billAmount && billAmount > 0 && data.status !== 'UNPAID') {
+      status = 'PAID';
+    }
+    const { received_amount, remaining_amount } = computeBalances(billAmount, rawReceived, status);
     const comm = data.commission !== undefined ? Number(data.commission) : old.commission;
-    const delta = (status === 'PAID' ? comm : 0) - (old.status === 'PAID' ? Number(old.commission || 0) : 0);
+    const delta =
+      (status === 'PAID' ? comm : 0) - (old.status === 'PAID' ? Number(old.commission || 0) : 0);
+
     const bill = {
       ...old,
       ...data,
@@ -186,7 +255,9 @@ export const api = {
           : old.customer_phone || '',
       due_date:
         data.due_date !== undefined ? String(data.due_date).trim() : old.due_date || '',
-      bill_amount: data.bill_amount !== undefined ? Number(data.bill_amount) : old.bill_amount,
+      bill_amount: billAmount,
+      received_amount,
+      remaining_amount,
       commission: comm,
       status,
       paid_at: status === 'PAID' ? old.paid_at || new Date().toISOString() : null,
@@ -202,7 +273,10 @@ export const api = {
       old_status: old.status,
       new_status: status,
       commission_delta: delta,
-      note: 'Bill updated',
+      note:
+        remaining_amount > 0 && received_amount > 0
+          ? `Updated (Received ${received_amount}, Udhar ${remaining_amount})`
+          : 'Bill updated',
     });
     return { bill };
   },
@@ -213,10 +287,18 @@ export const api = {
     if (idx === -1) throw new Error('Bill not found.');
     const old = bills[idx];
     if (old.status === nextStatus) return { bill: old, changed: false };
+    const billAmount = Number(old.bill_amount || 0);
+    const { received_amount, remaining_amount } = computeBalances(
+      billAmount,
+      nextStatus === 'PAID' ? billAmount : 0,
+      nextStatus
+    );
     const delta = nextStatus === 'PAID' ? Number(old.commission || 0) : -Number(old.commission || 0);
     const bill = {
       ...old,
       status: nextStatus,
+      received_amount,
+      remaining_amount,
       paid_at: nextStatus === 'PAID' ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     };
@@ -230,7 +312,7 @@ export const api = {
       old_status: old.status,
       new_status: nextStatus,
       commission_delta: delta,
-      note: nextStatus === 'PAID' ? 'Payment collected' : 'Marked unpaid',
+      note: nextStatus === 'PAID' ? 'Full payment collected' : 'Marked unpaid',
     });
     return { bill, changed: true };
   },
