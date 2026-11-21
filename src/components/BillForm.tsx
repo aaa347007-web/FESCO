@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
+  Calendar,
   Camera,
   CheckCircle2,
   Clock,
@@ -36,6 +37,30 @@ const ELECTRIC_14_DIGIT_COMPANIES = new Set([
   'TESCO',
 ]);
 
+const MONTH_MAP: Record<string, string> = {
+  JAN: '01',
+  FEB: '02',
+  MAR: '03',
+  APR: '04',
+  MAY: '05',
+  JUN: '06',
+  JUL: '07',
+  AUG: '08',
+  SEP: '09',
+  OCT: '10',
+  NOV: '11',
+  DEC: '12',
+};
+
+function parsePakBillDate(dayStr: string, monStr: string, yearStr: string): string {
+  const day = dayStr.padStart(2, '0');
+  const mon = MONTH_MAP[monStr.toUpperCase().slice(0, 3)];
+  if (!mon) return '';
+  const yr = yearStr.length === 2 ? `20${yearStr}` : yearStr;
+  if (Number(day) < 1 || Number(day) > 31) return '';
+  return `${yr}-${mon}-${day}`;
+}
+
 function cleanOcrNumericToken(token: string): string {
   return token
     .replace(/[Oo]/g, '0')
@@ -47,17 +72,18 @@ function cleanOcrNumericToken(token: string): string {
 function extractUtilityBillData(
   rawText: string,
   companyId: string
-): { referenceNumber: string; billAmount: string } {
+): { referenceNumber: string; billAmount: string; dueDate: string } {
   const text = rawText.replace(/\r/g, '\n');
   let referenceNumber = '';
   let billAmount = '';
+  let dueDate = '';
 
   const is14DigitElectric = ELECTRIC_14_DIGIT_COMPANIES.has((companyId || 'FESCO').toUpperCase());
 
   // 1. Check WAPDA/DISCO bottom barcode stub line:
-  // e.g. "NOV 26 - 01 13462 0077406 - 000006348 - 23 NOV 26" (tolerating O/o for 0)
+  // e.g. "NOV 26 - 01 13462 0077406 - 000006348 - 23 NOV 26"
   const barcodeLineMatch = text.match(
-    /\b([0-9Oo]{2}\s*[0-9Oo]{5}\s*[0-9Oo]{7})\s*[-–—]\s*([0-9Oo]{6,10})\s*[-–—]\s*[0-9]{1,2}\s*[A-Z]{3}\s*[0-9]{2}/i
+    /\b([0-9Oo]{2}\s*[0-9Oo]{5}\s*[0-9Oo]{7})\s*[-–—]\s*([0-9Oo]{6,10})\s*[-–—]\s*([0-9]{1,2})\s*([A-Z]{3})\s*([0-9]{2,4})/i
   );
 
   if (barcodeLineMatch) {
@@ -68,6 +94,14 @@ function extractUtilityBillData(
     }
     if (cleanedAmt && Number(cleanedAmt) >= 50) {
       billAmount = cleanedAmt;
+    }
+    const parsedStubDate = parsePakBillDate(
+      barcodeLineMatch[3],
+      barcodeLineMatch[4],
+      barcodeLineMatch[5]
+    );
+    if (parsedStubDate) {
+      dueDate = parsedStubDate;
     }
   }
 
@@ -107,7 +141,6 @@ function extractUtilityBillData(
     }
   }
 
-  // Fallback for Non-14-digit utilities (KE = 13, SNGPL = 11, SSGC = 10, PTCL = 10)
   if (!referenceNumber && !is14DigitElectric) {
     const refMatches = text.match(/\b([0-9]{10,13})\b/g) || [];
     for (const candidate of refMatches) {
@@ -119,9 +152,8 @@ function extractUtilityBillData(
     }
   }
 
-  // 3. Extract Exact Payable Amount (ignoring small 1-2 digit unit/code numbers like "43")
+  // 3. Extract Exact Payable Amount
   if (!billAmount) {
-    // Priority A: Padded barcode amount "- 000006348 -" anywhere on stub
     const paddedMatch = text.match(/[-–—]\s*([0-9Oo]{4,6}[1-9][0-9]{1,5})\s*[-–—]/);
     if (paddedMatch) {
       const amt = cleanOcrNumericToken(paddedMatch[1]).replace(/^0+/, '');
@@ -132,17 +164,12 @@ function extractUtilityBillData(
   }
 
   if (!billAmount) {
-    // Priority B: Look specifically after "PAYABLE WITHIN DUE DATE" (filtering out dates like 2026 & tiny numbers < 50)
-    const withinSectionMatch = text.match(
-      /PAYABLE\s+WITHIN\s+DUE\s+DATE([\s\S]{0,180})/i
-    );
+    const withinSectionMatch = text.match(/PAYABLE\s+WITHIN\s+DUE\s+DATE([\s\S]{0,180})/i);
     if (withinSectionMatch) {
-      const section = withinSectionMatch[1];
-      // Look for numbers like 6,348 or 6348 or Rs. 6348
-      const nums = section.match(/\b([1-9][0-9]{0,2}(?:,[0-9]{3})+|[1-9][0-9]{2,6})\b/g) || [];
+      const nums =
+        withinSectionMatch[1].match(/\b([1-9][0-9]{0,2}(?:,[0-9]{3})+|[1-9][0-9]{2,6})\b/g) || [];
       for (const rawNum of nums) {
         const val = Number(rawNum.replace(/,/g, ''));
-        // Skip year numbers (2025-2030) and tiny non-bill numbers
         if (val >= 50 && val <= 5000000 && !(val >= 2024 && val <= 2035)) {
           billAmount = String(val);
           break;
@@ -152,7 +179,6 @@ function extractUtilityBillData(
   }
 
   if (!billAmount) {
-    // Priority C: Generic "WITHIN DUE DATE" or "CURRENT BILL" / "TOTAL PAYABLE"
     const genericSectionMatch = text.match(
       /(?:WITHIN\s+DUE\s+DATE|PAYABLE\s+BY\s+DUE\s+DATE|TOTAL\s+PAYABLE)([\s\S]{0,150})/i
     );
@@ -169,7 +195,17 @@ function extractUtilityBillData(
     }
   }
 
-  return { referenceNumber, billAmount };
+  // 4. Fallback Due Date near "DUE DATE" label (e.g. "23 NOV 26" or "23-NOV-2026")
+  if (!dueDate) {
+    const dueMatch = text.match(
+      /DUE\s+DATE[\s\S]{0,80}?\b([0-9]{1,2})[\s/-]+([A-Z]{3})[\s/-]+([0-9]{2,4})\b/i
+    );
+    if (dueMatch) {
+      dueDate = parsePakBillDate(dueMatch[1], dueMatch[2], dueMatch[3]);
+    }
+  }
+
+  return { referenceNumber, billAmount, dueDate };
 }
 
 function fileToResizedBase64(file: File): Promise<string> {
@@ -248,6 +284,9 @@ export const BillForm: React.FC<BillFormProps> = ({
   const [customerPhone, setCustomerPhone] = useState<string>(
     mode === 'edit' && initialBill ? initialBill.customer_phone || '' : ''
   );
+  const [dueDate, setDueDate] = useState<string>(
+    mode === 'edit' && initialBill ? initialBill.due_date || '' : ''
+  );
   const [commission, setCommission] = useState<string>(
     mode === 'edit' && initialBill ? String(initialBill.commission) : String(defaultCommission)
   );
@@ -321,11 +360,15 @@ export const BillForm: React.FC<BillFormProps> = ({
       if (extracted.billAmount) {
         setBillAmount(extracted.billAmount);
       }
+      if (extracted.dueDate) {
+        setDueDate(extracted.dueDate);
+      }
 
       const parts: string[] = [];
       if (extracted.referenceNumber) parts.push(`Ref: ${extracted.referenceNumber}`);
       if (extracted.billAmount) parts.push(`Amount: ${currencyCode} ${extracted.billAmount}`);
-      setScanNotice(`Scanned (${parts.join(' · ')}) — Verify Amount, enter Name & Save.`);
+      if (extracted.dueDate) parts.push(`Due: ${extracted.dueDate}`);
+      setScanNotice(`Scanned (${parts.join(' · ')}) — Verify details & Save.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to scan bill image.');
     } finally {
@@ -341,6 +384,7 @@ export const BillForm: React.FC<BillFormProps> = ({
     const cleanedRef = referenceNumber.trim().replace(/\s+/g, '');
     const cleanedName = customerName.trim();
     const cleanedPhone = customerPhone.trim();
+    const cleanedDueDate = dueDate.trim();
     const parsedAmount = Number(billAmount);
     const parsedCommission = Number(commission);
 
@@ -374,6 +418,7 @@ export const BillForm: React.FC<BillFormProps> = ({
           reference_number: storedRef,
           customer_name: cleanedName,
           customer_phone: cleanedPhone,
+          due_date: cleanedDueDate,
           bill_amount: parsedAmount,
           commission: parsedCommission,
           status,
@@ -381,6 +426,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         setReferenceNumber('');
         setCustomerName('');
         setCustomerPhone('');
+        setDueDate('');
         setBillAmount('');
         setCommission(String(defaultCommission));
         setStatus('UNPAID');
@@ -392,6 +438,7 @@ export const BillForm: React.FC<BillFormProps> = ({
           reference_number: cleanedRef,
           customer_name: cleanedName,
           customer_phone: cleanedPhone,
+          due_date: cleanedDueDate,
           bill_amount: parsedAmount,
           commission: parsedCommission,
           status,
@@ -431,7 +478,7 @@ export const BillForm: React.FC<BillFormProps> = ({
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-xs font-bold text-blue-900">
             <Sparkles className="h-4 w-4 shrink-0 text-blue-700" />
-            <span>Auto-Fill Reference # & Amount from Bill Photo</span>
+            <span>Auto-Fill Reference #, Amount & Due Date from Photo</span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex">
             <button
@@ -575,8 +622,27 @@ export const BillForm: React.FC<BillFormProps> = ({
         </div>
       </div>
 
-      {/* 3. Customer Name & Phone Number (Optional) */}
+      {/* 3. Due Date & Customer Name */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label
+            htmlFor="bill-due-date"
+            className="mb-1.5 block text-sm font-semibold text-slate-800"
+          >
+            Due Date <span className="text-xs font-normal text-slate-500">(Aakhri Tareekh)</span>
+          </label>
+          <div className="relative">
+            <Calendar className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600" />
+            <input
+              id="bill-due-date"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 font-mono text-sm font-semibold text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+            />
+          </div>
+        </div>
+
         <div>
           <label
             htmlFor="bill-customer-name"
@@ -596,31 +662,32 @@ export const BillForm: React.FC<BillFormProps> = ({
             />
           </div>
         </div>
+      </div>
 
-        <div>
-          <label
-            htmlFor="bill-customer-phone"
-            className="mb-1.5 block text-sm font-semibold text-slate-800"
-          >
-            Phone / WhatsApp <span className="text-xs font-normal text-slate-500">(Optional)</span>
-          </label>
-          <div className="relative">
-            <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              id="bill-customer-phone"
-              type="tel"
-              inputMode="tel"
-              maxLength={15}
-              placeholder="03001234567 (Optional)"
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
-              className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 font-mono text-sm font-semibold text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
-            />
-          </div>
+      {/* 4. Phone Number (Optional) */}
+      <div>
+        <label
+          htmlFor="bill-customer-phone"
+          className="mb-1.5 block text-sm font-semibold text-slate-800"
+        >
+          Phone / WhatsApp <span className="text-xs font-normal text-slate-500">(Optional)</span>
+        </label>
+        <div className="relative">
+          <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            id="bill-customer-phone"
+            type="tel"
+            inputMode="tel"
+            maxLength={15}
+            placeholder="03001234567 (Optional)"
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+            className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3.5 font-mono text-sm font-semibold text-slate-900 placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
+          />
         </div>
       </div>
 
-      {/* 4. Commission & Payment Status */}
+      {/* 5. Commission & Payment Status */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label
