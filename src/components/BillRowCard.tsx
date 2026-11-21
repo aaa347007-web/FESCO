@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Clock, Edit3, History, Trash2 } from 'lucide-react';
+import { CheckCircle2, Clock, Edit3, History, Phone, Trash2, User } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '../lib/format';
 import type { Bill, PaymentStatus } from '../types/bill';
 
@@ -37,6 +37,23 @@ export const BillCard: React.FC<BillListItemProps> = ({
           <div className="mt-1 font-mono text-base font-bold tracking-tight text-slate-900 break-all">
             {bill.reference_number}
           </div>
+
+          {(bill.customer_name || bill.customer_phone) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-700">
+              {bill.customer_name && (
+                <span className="inline-flex items-center gap-1 text-slate-800">
+                  <User className="h-3.5 w-3.5 text-blue-600" />
+                  <span>{bill.customer_name}</span>
+                </span>
+              )}
+              {bill.customer_phone && (
+                <span className="inline-flex items-center gap-1 font-mono text-slate-600">
+                  <Phone className="h-3 w-3 text-emerald-600" />
+                  <span>{bill.customer_phone}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <button
