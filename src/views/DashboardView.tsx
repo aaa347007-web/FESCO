@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
+  AlertTriangle,
   ArrowRight,
   Banknote,
+  Calendar,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -10,9 +12,11 @@ import {
   Download,
   ExternalLink,
   FileText,
+  Phone,
   Plus,
   Search,
   TrendingUp,
+  User,
   X,
   Zap,
 } from 'lucide-react';
@@ -27,6 +31,13 @@ interface NativeBrowserPlugin {
 }
 
 const Browser = registerPlugin<NativeBrowserPlugin>('Browser');
+
+function getTodayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
 
 interface DashboardViewProps {
   stats: DashboardStats | null;
@@ -120,6 +131,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const currentMonthLabel = formatMonthLabel(getLocalMonthString());
+  const todayIso = getTodayIso();
 
   if (loading && !stats) {
     return (
@@ -146,10 +158,116 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     currentMonthCommission: 0,
     nextSerialNumber: 1,
     recentBills: [],
+    urgentUnpaidBills: [],
   };
+
+  const urgentBills = s.urgentUnpaidBills ?? [];
 
   return (
     <div className="space-y-6">
+      {/* Urgent Unpaid Due Date Reminder Alert */}
+      {urgentBills.length > 0 && (
+        <section
+          aria-label="Due Date Alerts"
+          className="rounded-2xl border border-red-200 bg-red-50/90 p-4 shadow-xs sm:p-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-extrabold text-red-950 sm:text-base">
+                  Due Date Alert ({urgentBills.length} Unpaid{' '}
+                  {urgentBills.length === 1 ? 'Bill' : 'Bills'})
+                </h2>
+                <p className="text-xs text-red-800">
+                  In bills ki aakhri tareekh aaj/kal hai ya guzar chuki hai
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('bills')}
+              className="text-xs font-extrabold text-red-700 underline hover:text-red-900"
+            >
+              View All Unpaid
+            </button>
+          </div>
+
+          <div className="mt-3.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {urgentBills.map((bill) => {
+              const isOverdue = Boolean(bill.due_date && bill.due_date < todayIso);
+              const isDueToday = bill.due_date === todayIso;
+              const busy = togglingId === bill.id;
+              return (
+                <div
+                  key={bill.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-red-200/80 bg-white p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-xs font-extrabold text-blue-700">
+                        #{bill.serial_number}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-extrabold ${
+                          isOverdue
+                            ? 'bg-red-600 text-white'
+                            : isDueToday
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-amber-100 text-amber-900'
+                        }`}
+                      >
+                        <Calendar className="h-3 w-3" />
+                        <span>
+                          {isOverdue
+                            ? `Overdue (${bill.due_date})`
+                            : isDueToday
+                              ? 'Due Today!'
+                              : `Due ${bill.due_date}`}
+                        </span>
+                      </span>
+                    </div>
+
+                    <div className="mt-1 truncate font-mono text-xs font-bold text-slate-900">
+                      {bill.reference_number} · {formatCurrency(bill.bill_amount, currencyCode)}
+                    </div>
+
+                    {(bill.customer_name || bill.customer_phone) && (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-600">
+                        {bill.customer_name && (
+                          <span className="inline-flex items-center gap-1">
+                            <User className="h-3 w-3 text-blue-600" />
+                            <span>{bill.customer_name}</span>
+                          </span>
+                        )}
+                        {bill.customer_phone && (
+                          <span className="inline-flex items-center gap-1 font-mono">
+                            <Phone className="h-3 w-3 text-emerald-600" />
+                            <span>{bill.customer_phone}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onToggleStatus(bill, 'PAID')}
+                    className="inline-flex min-h-[38px] shrink-0 items-center gap-1 rounded-xl bg-emerald-600 px-3 text-xs font-extrabold text-white shadow-xs transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Mark Paid</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Top Section: All Pakistan Instant Online Bill Checker & PDF Downloader */}
       <section className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-700 via-blue-800 to-slate-900 p-5 text-white shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -256,7 +374,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         )}
 
-        {/* Quick Action Bar after checking a bill */}
         {lastCheckedBill && (
           <div className="mt-4 flex flex-col justify-between gap-3 rounded-xl border border-white/15 bg-white/10 p-3.5 sm:flex-row sm:items-center">
             <div className="text-xs">
@@ -388,7 +505,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div>
           <h3 className="text-base font-bold text-slate-900">Saved Records Lookup</h3>
           <p className="text-xs text-slate-500">
-            Search your saved bills across all months by Reference Number or Serial Number
+            Search your saved bills across all months by Reference Number, Customer Name, Phone, or Serial #
           </p>
         </div>
         <div className="relative mt-3">
@@ -397,7 +514,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             type="text"
             value={quickSearch}
             onChange={(e) => setQuickSearch(e.target.value)}
-            placeholder="Search saved Reference Number or Serial #..."
+            placeholder="Search saved Reference #, Customer Name, Phone, or Serial #..."
             className="min-h-[46px] w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/15"
           />
           {quickSearch && (
