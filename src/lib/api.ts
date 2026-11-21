@@ -2,6 +2,13 @@ const BILLS_KEY = 'fesco_bills_v2';
 const HISTORY_KEY = 'fesco_bill_history_v2';
 const SETTINGS_KEY = 'fesco_settings_v2';
 
+const VALID_ACCOUNTS = new Set(['CASH', 'EASYPAISA', 'JAZZCASH', 'BANK']);
+
+function normalizeAccount(acc) {
+  const upper = String(acc || 'CASH').toUpperCase().trim();
+  return VALID_ACCOUNTS.has(upper) ? upper : 'CASH';
+}
+
 const DEFAULT_SETTINGS = {
   id: 1,
   shop_name: 'Zahid Mobiles and Photo State',
@@ -113,6 +120,19 @@ export const api = {
       return sum + remaining_amount;
     }, 0);
 
+    const accountTotals = {
+      CASH: { count: 0, amount: 0 },
+      EASYPAISA: { count: 0, amount: 0 },
+      JAZZCASH: { count: 0, amount: 0 },
+      BANK: { count: 0, amount: 0 },
+    };
+
+    for (const b of bills) {
+      const acc = normalizeAccount(b.payment_account);
+      accountTotals[acc].count += 1;
+      accountTotals[acc].amount += Number(b.bill_amount || 0);
+    }
+
     return {
       totalBills: bills.length,
       totalBillAmount: bills.reduce((s, b) => s + Number(b.bill_amount || 0), 0),
@@ -128,6 +148,7 @@ export const api = {
       urgentUnpaidBills,
       totalUdharAmount,
       udharBillsCount: udharBills.length,
+      accountTotals,
     };
   },
 
@@ -146,6 +167,9 @@ export const api = {
     } else if (params.status && params.status !== 'ALL') {
       bills = bills.filter((b) => b.status === params.status);
     }
+    if (params.account && params.account !== 'ALL') {
+      bills = bills.filter((b) => normalizeAccount(b.payment_account) === params.account);
+    }
     if (params.month) bills = bills.filter((b) => getMonthStr(b.bill_date || b.created_at) === params.month);
     if (params.date) bills = bills.filter((b) => (b.bill_date || b.created_at || '').startsWith(params.date));
     if (params.fromDate) bills = bills.filter((b) => (b.bill_date || b.created_at || '').slice(0, 10) >= params.fromDate);
@@ -157,7 +181,8 @@ export const api = {
           String(b.reference_number || '').toLowerCase().includes(q) ||
           String(b.serial_number || '').toLowerCase().includes(q) ||
           String(b.customer_name || '').toLowerCase().includes(q) ||
-          String(b.customer_phone || '').toLowerCase().includes(q)
+          String(b.customer_phone || '').toLowerCase().includes(q) ||
+          normalizeAccount(b.payment_account).toLowerCase().includes(q)
       );
     }
     bills.sort((a, b) => Number(b.serial_number || 0) - Number(a.serial_number || 0));
@@ -184,6 +209,7 @@ export const api = {
     }
     const { received_amount, remaining_amount } = computeBalances(billAmount, rawReceived, status);
     const commission = Number(data.commission ?? readSettings().default_commission);
+    const payment_account = normalizeAccount(data.payment_account);
 
     const bill = {
       id: Date.now(),
@@ -191,6 +217,7 @@ export const api = {
       reference_number: ref,
       customer_name: String(data.customer_name || '').trim(),
       customer_phone: String(data.customer_phone || '').trim(),
+      payment_account,
       bill_amount: billAmount,
       received_amount,
       remaining_amount,
@@ -216,8 +243,8 @@ export const api = {
       commission_delta: status === 'PAID' ? commission : 0,
       note:
         remaining_amount > 0 && received_amount > 0
-          ? `Bill added (Received ${received_amount}, Udhar ${remaining_amount})`
-          : `Bill added (${status})`,
+          ? `Bill added via ${payment_account} (Received ${received_amount}, Udhar ${remaining_amount})`
+          : `Bill added via ${payment_account} (${status})`,
     });
     return { bill };
   },
@@ -243,6 +270,10 @@ export const api = {
     const comm = data.commission !== undefined ? Number(data.commission) : old.commission;
     const delta =
       (status === 'PAID' ? comm : 0) - (old.status === 'PAID' ? Number(old.commission || 0) : 0);
+    const payment_account =
+      data.payment_account !== undefined
+        ? normalizeAccount(data.payment_account)
+        : normalizeAccount(old.payment_account);
 
     const bill = {
       ...old,
@@ -255,6 +286,7 @@ export const api = {
           : old.customer_phone || '',
       due_date:
         data.due_date !== undefined ? String(data.due_date).trim() : old.due_date || '',
+      payment_account,
       bill_amount: billAmount,
       received_amount,
       remaining_amount,
@@ -275,8 +307,8 @@ export const api = {
       commission_delta: delta,
       note:
         remaining_amount > 0 && received_amount > 0
-          ? `Updated (Received ${received_amount}, Udhar ${remaining_amount})`
-          : 'Bill updated',
+          ? `Updated via ${payment_account} (Received ${received_amount}, Udhar ${remaining_amount})`
+          : `Bill updated (${payment_account})`,
     });
     return { bill };
   },
