@@ -18,6 +18,12 @@ function getTodayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function getPlusDaysStr(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function getMonthStr(dateStr) {
   return dateStr && dateStr.length >= 7 ? dateStr.slice(0, 7) : getTodayStr().slice(0, 7);
 }
@@ -71,12 +77,17 @@ export const api = {
   async getDashboard() {
     const bills = readBills();
     const today = getTodayStr();
+    const soonLimit = getPlusDaysStr(2);
     const currentMonth = getMonthStr();
     const paid = bills.filter((b) => b.status === 'PAID');
     const unpaid = bills.filter((b) => b.status !== 'PAID');
     const todayBills = bills.filter((b) => (b.bill_date || b.created_at || '').startsWith(today));
     const maxSerial = bills.reduce((max, b) => Math.max(max, Number(b.serial_number || 0)), 0);
     const recent = [...bills].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    const urgentUnpaidBills = unpaid
+      .filter((b) => b.due_date && b.due_date <= soonLimit)
+      .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
 
     return {
       totalBills: bills.length,
@@ -90,6 +101,7 @@ export const api = {
       currentMonthCommission: paid.filter((b) => getMonthStr(b.bill_date || b.created_at) === currentMonth).reduce((s, b) => s + Number(b.commission || 0), 0),
       nextSerialNumber: maxSerial + 1,
       recentBills: recent.slice(0, 10),
+      urgentUnpaidBills,
     };
   },
 
@@ -133,7 +145,7 @@ export const api = {
       commission,
       status,
       bill_date: data.bill_date || getTodayStr(),
-      due_date: data.due_date || '',
+      due_date: String(data.due_date || '').trim(),
       added_at: now,
       paid_at: status === 'PAID' ? now : null,
       notes: data.notes || '',
@@ -172,6 +184,8 @@ export const api = {
         data.customer_phone !== undefined
           ? String(data.customer_phone).trim()
           : old.customer_phone || '',
+      due_date:
+        data.due_date !== undefined ? String(data.due_date).trim() : old.due_date || '',
       bill_amount: data.bill_amount !== undefined ? Number(data.bill_amount) : old.bill_amount,
       commission: comm,
       status,
