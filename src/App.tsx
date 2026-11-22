@@ -968,10 +968,12 @@ export default function App() {
 
             {activeTab === 'bills' && (
               <AllBillsView
-                key={`bills-${refreshKey}`}
-                settings={settings}
+                currencyCode={settings.currency_code}
+                months={months}
+                refreshKey={refreshKey}
                 initialSearch={billsSearchSeed}
                 togglingId={togglingId}
+                onAddClick={() => setActiveTab('add')}
                 onToggleStatus={handleToggleStatus}
                 onEditBill={setEditingBill}
                 onDeleteBill={setDeletingBill}
@@ -981,14 +983,16 @@ export default function App() {
 
             {activeTab === 'months' && (
               <MonthlyHistoryView
-                key={`months-${refreshKey}`}
                 months={months}
+                currencyCode={settings.currency_code}
                 settings={settings}
+                refreshKey={refreshKey}
                 togglingId={togglingId}
                 onToggleStatus={handleToggleStatus}
                 onEditBill={setEditingBill}
                 onDeleteBill={setDeletingBill}
                 onViewHistory={setHistoryBillId}
+                onToast={showToast}
               />
             )}
 
