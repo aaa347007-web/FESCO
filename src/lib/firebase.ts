@@ -9,7 +9,10 @@ import {
   browserLocalPersistence,
   RecaptchaVerifier,
   signInWithPhoneNumber,
+  updateEmail,
   updatePassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   type ConfirmationResult,
   type User,
 } from 'firebase/auth';
@@ -18,6 +21,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 
@@ -35,7 +39,6 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Keep user logged in permanently across app restarts until explicit logout
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 
 export function normalizePakPhone(rawPhone: string): string {
@@ -70,29 +73,29 @@ export function emailToPhone(email: string | null | undefined, phoneNumber?: str
 export function mapFirebaseAuthError(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
   if (code === 'auth/email-already-in-use') {
-    return 'Yeh mobile number pehle se registered hai. Sign In karein ya Forgot PIN use karein.';
+    return 'Yeh mobile number pehle se kisi aur account par registered hai.';
   }
   if (
     code === 'auth/invalid-credential' ||
     code === 'auth/wrong-password' ||
     code === 'auth/user-not-found'
   ) {
-    return 'Mobile number ya 6-hindso wala PIN ghalat hai.';
+    return 'Mojooda (Current) 6-hindso wala PIN ghalat hai.';
+  }
+  if (code === 'auth/requires-recent-login') {
+    return 'Security ke liye ek baar Logout karke dobara Login karein, phir number ya PIN badlein.';
   }
   if (code === 'auth/invalid-verification-code') {
-    return 'SMS OTP code ghalat hai. Dobara check karein.';
+    return 'OTP code ghalat hai. Dobara check karein.';
   }
   if (code === 'auth/code-expired') {
     return 'OTP code expire ho gaya hai. Dobara code mangwayein.';
   }
-  if (code === 'auth/captcha-check-failed' || code === 'auth/invalid-app-credential') {
-    return 'Security verification fail hui. Dobara koshish karein.';
-  }
   if (code === 'auth/network-request-failed') {
     return 'Internet connection check karein aur dobara koshish karein.';
   }
-  if (code === 'auth/too-many-requests' || code === 'auth/quota-exceeded') {
-    return 'Aaj ki SMS limit poori ho gayi hai ya zyada koshishon ki wajah se thori der baad try karein.';
+  if (code === 'auth/too-many-requests') {
+    return 'Zyada ghalat koshishon ki wajah se thori der baad try karein.';
   }
   return err instanceof Error ? err.message : 'Account error. Dobara koshish karein.';
 }
@@ -119,7 +122,6 @@ export async function signUpWithPhonePin(phone: string, pin: string, shopName?: 
     { merge: true }
   );
 
-  // Map phone number -> primary data UID for recovery
   await setDoc(
     doc(db, 'phone_directory', cleanPhone),
     {
@@ -143,7 +145,6 @@ export async function signInWithPhonePin(phone: string, pin: string) {
   }
   await setPersistence(auth, browserLocalPersistence);
 
-  // 1. Check if user reset PIN via SMS OTP previously
   const dirSnap = await getDoc(doc(db, 'phone_directory', cleanPhone));
   if (dirSnap.exists()) {
     const dirData = dirSnap.data();
@@ -151,13 +152,11 @@ export async function signInWithPhonePin(phone: string, pin: string) {
       if (dirData.customPin !== pin) {
         throw new Error('6-hindso wala PIN ghalat hai.');
       }
-      // Sign in via email/password if synced, or return linked user session
       try {
         const email = phoneToEmail(cleanPhone);
         const cred = await signInWithEmailAndPassword(auth, email, pin);
         return cred.user;
       } catch {
-        // Fallback if user signed in via Phone Auth during reset
         if (auth.currentUser) return auth.currentUser;
       }
     }
@@ -166,7 +165,6 @@ export async function signInWithPhonePin(phone: string, pin: string) {
   const email = phoneToEmail(cleanPhone);
   const cred = await signInWithEmailAndPassword(auth, email, pin);
 
-  // Ensure directory mapping exists for older accounts too
   await setDoc(
     doc(db, 'phone_directory', cleanPhone),
     {
@@ -180,7 +178,85 @@ export async function signInWithPhonePin(phone: string, pin: string) {
   return cred.user;
 }
 
-// Step 1 of Forgot PIN: Send 6-Digit SMS OTP via Firebase Phone Auth
+// Update User's Mobile Number and/or 6-Digit PIN from "Me" Profile Screen
+export async function updateUserMobileAndPin(params: {
+  currentPin: string;
+  newPhone: string;
+  newPin?: string;
+}): Promise<User> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('Aap login nahi hain. Pehle login karein.');
+  }
+
+  const cleanNewPhone = normalizePakPhone(params.newPhone);
+  if (!/^03\d{9}$/.test(cleanNewPhone)) {
+    throw new Error('Sahih 11-hindso wala Pakistani mobile number likhein (maslan 03001234567)');
+  }
+  if (!/^\d{6}$/.test(params.currentPin)) {
+    throw new Error('Tasdeeq ke liye apna mojooda 6-hindso wala PIN likhein.');
+  }
+  if (params.newPin && !/^\d{6}$/.test(params.newPin)) {
+    throw new Error('Naya PIN 6 hindso ka hona chahiye.');
+  }
+
+  const oldPhone = emailToPhone(user.email, user.phoneNumber);
+  const phoneChanged = cleanNewPhone !== oldPhone;
+  const pinChanged = Boolean(params.newPin && params.newPin !== params.currentPin);
+
+  if (!phoneChanged && !pinChanged) {
+    throw new Error('Naya mobile number ya naya PIN pehle wale se mukhtalif hona chahiye.');
+  }
+
+  // Re-authenticate user with current PIN if email/password provider is linked
+  if (user.email) {
+    const credential = EmailAuthProvider.credential(user.email, params.currentPin);
+    await reauthenticateWithCredential(user, credential);
+  }
+
+  // Check if new phone is already taken by another account
+  if (phoneChanged) {
+    const targetDirSnap = await getDoc(doc(db, 'phone_directory', cleanNewPhone));
+    if (targetDirSnap.exists() && targetDirSnap.data().primaryUid !== user.uid) {
+      throw new Error('Yeh naya mobile number pehle se kisi aur account par istemal ho raha hai.');
+    }
+    const nextEmail = phoneToEmail(cleanNewPhone);
+    await updateEmail(user, nextEmail);
+  }
+
+  if (pinChanged && params.newPin) {
+    await updatePassword(user, params.newPin);
+  }
+
+  // Update Firestore profile & phone_directory
+  await setDoc(
+    doc(db, 'users', user.uid, 'profile', 'info'),
+    {
+      phone: cleanNewPhone,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  if (phoneChanged && oldPhone) {
+    await deleteDoc(doc(db, 'phone_directory', oldPhone)).catch(() => {});
+  }
+
+  await setDoc(
+    doc(db, 'phone_directory', cleanNewPhone),
+    {
+      primaryUid: user.uid,
+      phone: cleanNewPhone,
+      ...(pinChanged && params.newPin ? { customPin: params.newPin } : {}),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  await user.reload();
+  return auth.currentUser || user;
+}
+
 export async function sendForgotPinOtp(
   phone: string,
   recaptchaContainerId: string
@@ -192,7 +268,7 @@ export async function sendForgotPinOtp(
     try {
       win.recaptchaVerifier.clear();
     } catch {
-      // ignore cleanup error
+      // ignore
     }
   }
 
@@ -204,7 +280,6 @@ export async function sendForgotPinOtp(
   return await signInWithPhoneNumber(auth, intlPhone, verifier);
 }
 
-// Step 2 of Forgot PIN: Verify 6-Digit OTP & Save New 6-Digit PIN
 export async function verifyOtpAndResetPin(
   confirmation: ConfirmationResult,
   otpCode: string,
@@ -223,12 +298,10 @@ export async function verifyOtpAndResetPin(
   const phoneCred = await confirmation.confirm(otpCode);
   const verifiedUser = phoneCred.user;
 
-  // Check if an older backup exists under this phone number
   const dirRef = doc(db, 'phone_directory', cleanPhone);
   const dirSnap = await getDoc(dirRef);
   const oldUid = dirSnap.exists() ? (dirSnap.data().primaryUid as string | undefined) : undefined;
 
-  // Copy old backup to verified user's UID if needed so no data is lost
   if (oldUid && oldUid !== verifiedUser.uid) {
     const oldBackup = await loadCloudBackup(oldUid);
     if (oldBackup) {
@@ -236,7 +309,6 @@ export async function verifyOtpAndResetPin(
     }
   }
 
-  // Update directory with verified UID and new PIN
   await setDoc(
     dirRef,
     {
@@ -249,11 +321,10 @@ export async function verifyOtpAndResetPin(
     { merge: true }
   );
 
-  // Also try updating password if email credential is attached
   try {
     await updatePassword(verifiedUser, newPin);
   } catch {
-    // Phone-only auth user uses customPin verification seamlessly
+    // ignore
   }
 
   return verifiedUser;
