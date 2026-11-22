@@ -1,41 +1,40 @@
 import { initializeApp } from 'firebase/app';
 import {
-  browserLocalPersistence,
-  createUserWithEmailAndPassword,
-  EmailAuthProvider,
   getAuth,
-  onAuthStateChanged,
-  reauthenticateWithCredential,
-  setPersistence,
+  createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
   updateEmail,
   updatePassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   type User,
 } from 'firebase/auth';
 import {
-  deleteDoc,
-  doc,
-  getDoc,
   getFirestore,
-  serverTimestamp,
+  doc,
   setDoc,
+  getDoc,
+  deleteDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD0gk_jdl_N24ht00LpKVNfRcijYfdjwwg",
+  apiKey: "AIzaSyD0gk_j2W_N24ht00LpKVNfRcijYfdjwwg",
   authDomain: "pak-bill-manager.firebaseapp.com",
   projectId: "pak-bill-manager",
   storageBucket: "pak-bill-manager.firebasestorage.app",
   messagingSenderId: "747696391606",
   appId: "1:747696391606:web:4c6b567a23629e0c122d17",
-  measurementId: "G-1K2AH9B44V"
+  measurementId: "G-1KLNH9RW4W"
 };
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export { onAuthStateChanged, type User };
 
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 
@@ -50,37 +49,48 @@ export interface ConfirmationResult {
 }
 
 export function normalizePakPhone(rawPhone: string): string {
-  const digits = String(rawPhone || '').replace(/\D/g, '');
-  if (digits.startsWith('92') && digits.length === 12) return '0' + digits.slice(2);
-  if (digits.startsWith('03') && digits.length === 11) return digits;
+  let digits = rawPhone.replace(/\D/g, '');
+  if (digits.startsWith('92') && digits.length === 12) {
+    digits = '0' + digits.slice(2);
+  } else if (digits.length === 10 && digits.startsWith('3')) {
+    digits = '0' + digits;
+  }
   return digits;
 }
 
-export function phoneToEmail(phone: string): string {
-  const clean = normalizePakPhone(phone);
-  return `${clean}@pakbill.app`;
+export function toInternationalPakPhone(rawPhone: string): string {
+  const clean = normalizePakPhone(rawPhone);
+  if (!/^03\d{9}$/.test(clean)) {
+    throw new Error('Sahih 11-hindso wala Pakistani mobile number likhein (maslan 03001234567)');
+  }
+  return '+92' + clean.slice(1);
 }
 
-export function emailToPhone(email?: string | null, phoneNumber?: string | null): string {
+export function phoneToEmail(phone: string): string {
+  const normalized = normalizePakPhone(phone);
+  return `${normalized}@pakbill.app`;
+}
+
+export function emailToPhone(email: string | null | undefined, phoneNumber?: string | null): string {
   if (phoneNumber) return normalizePakPhone(phoneNumber);
   if (!email) return '';
-  return email.split('@')[0] || '';
+  return email.replace('@pakbill.app', '');
 }
 
 export function mapFirebaseAuthError(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
   if (code === 'auth/email-already-in-use') {
-    return 'Yeh mobile number pehle se registered hai. Sign In karein ya Forget PIN use karein.';
+    return 'Yeh mobile number pehle se kisi aur account par registered hai.';
   }
   if (
     code === 'auth/invalid-credential' ||
     code === 'auth/wrong-password' ||
     code === 'auth/user-not-found'
   ) {
-    return 'Mobile number ya 6-hindso wala PIN ghalat hai.';
+    return 'Mojooda (Current) 6-hindso wala PIN ghalat hai.';
   }
   if (code === 'auth/requires-recent-login') {
-    return 'Security ke liye ek baar logout karke dobara login karein, phir number ya PIN badlein.';
+    return 'Security ke liye ek baar Logout karke dobara Login karein, phir number ya PIN badlein.';
   }
   if (code === 'auth/invalid-verification-code') {
     return 'OTP code ghalat hai. Dobara check karein.';
@@ -97,19 +107,16 @@ export function mapFirebaseAuthError(err: unknown): string {
   return err instanceof Error ? err.message : 'Account error. Dobara koshish karein.';
 }
 
-export async function signUpWithPhonePin(
-  phone: string,
-  pin: string,
-  shopName?: string
-): Promise<User> {
+export async function signUpWithPhonePin(phone: string, pin: string, shopName?: string) {
   const cleanPhone = normalizePakPhone(phone);
   if (!/^03\d{9}$/.test(cleanPhone)) {
     throw new Error('Sahih 11-hindso wala Pakistani mobile number likhein (maslan 03001234567)');
   }
   if (!/^\d{6}$/.test(pin)) {
-    throw new Error('PIN poore 6 hindso ka hona chahiye.');
+    throw new Error('6-hindso ka PIN likhein (maslan 123456)');
   }
 
+  await setPersistence(auth, browserLocalPersistence);
   const email = phoneToEmail(cleanPhone);
   const cred = await createUserWithEmailAndPassword(auth, email, pin);
 
@@ -117,8 +124,8 @@ export async function signUpWithPhonePin(
     doc(db, 'users', cred.user.uid, 'profile', 'info'),
     {
       phone: cleanPhone,
-      shopName: (shopName || '').trim(),
-      updatedAt: serverTimestamp(),
+      shopName: shopName?.trim() || '',
+      createdAt: serverTimestamp(),
     },
     { merge: true }
   );
@@ -137,17 +144,31 @@ export async function signUpWithPhonePin(
   return cred.user;
 }
 
-export async function signInWithPhonePin(phone: string, pin: string): Promise<User> {
+export async function signInWithPhonePin(phone: string, pin: string) {
   const cleanPhone = normalizePakPhone(phone);
   if (!/^03\d{9}$/.test(cleanPhone)) {
     throw new Error('Sahih 11-hindso wala Pakistani mobile number likhein (maslan 03001234567)');
   }
+  if (!/^\d{6}$/.test(pin)) {
+    throw new Error('6-hindso ka PIN likhein');
+  }
+
+  await setPersistence(auth, browserLocalPersistence);
 
   const dirSnap = await getDoc(doc(db, 'phone_directory', cleanPhone));
   if (dirSnap.exists()) {
     const dirData = dirSnap.data();
-    if (dirData.resetActive && dirData.customPin && dirData.customPin !== pin) {
-      throw new Error('6-hindso wala PIN ghalat hai.');
+    if (dirData.resetActive && dirData.customPin) {
+      if (dirData.customPin !== pin) {
+        throw new Error('6-hindso wala PIN ghalat hai.');
+      }
+      try {
+        const email = phoneToEmail(cleanPhone);
+        const cred = await signInWithEmailAndPassword(auth, email, pin);
+        return cred.user;
+      } catch {
+        if (auth.currentUser) return auth.currentUser;
+      }
     }
   }
 
@@ -198,11 +219,13 @@ export async function updateUserMobileAndPin(params: {
     throw new Error('Naya mobile number ya naya PIN pehle wale se mukhtalif hona chahiye.');
   }
 
+  // Re-authenticate user with current PIN if email/password provider is linked
   if (user.email) {
     const credential = EmailAuthProvider.credential(user.email, params.currentPin);
     await reauthenticateWithCredential(user, credential);
   }
 
+  // Check if new phone is already taken by another account
   if (phoneChanged) {
     const targetDirSnap = await getDoc(doc(db, 'phone_directory', cleanNewPhone));
     if (targetDirSnap.exists() && targetDirSnap.data().primaryUid !== user.uid) {
@@ -216,6 +239,7 @@ export async function updateUserMobileAndPin(params: {
     await updatePassword(user, params.newPin);
   }
 
+  // Update Firestore profile & phone_directory
   await setDoc(
     doc(db, 'users', user.uid, 'profile', 'info'),
     {
@@ -234,7 +258,7 @@ export async function updateUserMobileAndPin(params: {
     {
       primaryUid: user.uid,
       phone: cleanNewPhone,
-      customPin: pinChanged && params.newPin ? params.newPin : params.currentPin,
+      ...(pinChanged && params.newPin ? { customPin: params.newPin } : { customPin: params.currentPin }),
       updatedAt: serverTimestamp(),
     },
     { merge: true }
@@ -287,15 +311,16 @@ export async function sendForgotPinOtp(
 export async function verifyOtpAndResetPin(
   confirmation: ConfirmationResult,
   otpCode: string,
-  phone: string,
+  rawPhone: string,
   newPin: string
 ): Promise<User> {
-  const cleanPhone = normalizePakPhone(phone);
+  const cleanPhone = normalizePakPhone(rawPhone);
   const cleanOtp = String(otpCode || '').replace(/\D/g, '');
-  const cleanNewPin = String(newPin || '').replace(/\D/g, '');
-
-  if (!/^\d{6}$/.test(cleanNewPin)) {
-    throw new Error('Naya PIN poore 6 hindso ka hona chahiye.');
+  if (!/^\d{6}$/.test(cleanOtp)) {
+    throw new Error('6-hindso wala WhatsApp OTP code likhein.');
+  }
+  if (!/^\d{6}$/.test(newPin)) {
+    throw new Error('Naya PIN 6 hindso ka hona chahiye.');
   }
   if (Date.now() > confirmation.expiresAt) {
     throw new Error('OTP code expire ho gaya hai. Dobara code mangwayein.');
@@ -303,6 +328,8 @@ export async function verifyOtpAndResetPin(
   if (confirmation.phone !== cleanPhone || confirmation.otp !== cleanOtp) {
     throw new Error('OTP code ghalat hai. Dobara check karein.');
   }
+
+  await setPersistence(auth, browserLocalPersistence);
 
   const dirRef = doc(db, 'phone_directory', cleanPhone);
   const dirSnap = await getDoc(dirRef);
@@ -314,52 +341,57 @@ export async function verifyOtpAndResetPin(
   const oldPin = String(dirData?.customPin || '');
   const email = phoneToEmail(cleanPhone);
 
-  let activeUser: User | null = null;
+  let verifiedUser: User | null = null;
   if (oldPin) {
-    const cred = await signInWithEmailAndPassword(auth, email, oldPin);
-    await updatePassword(cred.user, cleanNewPin);
-    activeUser = cred.user;
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, oldPin);
+      await updatePassword(cred.user, newPin);
+      verifiedUser = cred.user;
+    } catch {
+      // Fallback if password was already updated
+    }
+  }
+
+  if (!verifiedUser) {
+    const cred = await signInWithEmailAndPassword(auth, email, newPin);
+    verifiedUser = cred.user;
   }
 
   await setDoc(
     dirRef,
     {
-      primaryUid: activeUser?.uid || dirData?.primaryUid || '',
+      primaryUid: verifiedUser.uid,
       phone: cleanPhone,
-      customPin: cleanNewPin,
+      customPin: newPin,
       resetActive: true,
       updatedAt: serverTimestamp(),
     },
     { merge: true }
   );
 
-  if (!activeUser) {
-    const cred = await signInWithEmailAndPassword(auth, email, cleanNewPin);
-    activeUser = cred.user;
-  }
-
-  return activeUser;
+  return verifiedUser;
 }
 
-export async function saveCloudBackup(
-  uid: string,
-  payload: Record<string, unknown>
-): Promise<void> {
+export async function logoutUser() {
+  await signOut(auth);
+}
+
+export { onAuthStateChanged };
+export type { User };
+
+export async function saveCloudBackup(uid: string, payload: Record<string, unknown>) {
   await setDoc(
-    doc(db, 'backups', uid),
+    doc(db, 'users', uid, 'backup', 'latest'),
     {
       ...payload,
-      syncedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     },
     { merge: true }
   );
 }
 
 export async function loadCloudBackup(uid: string): Promise<Record<string, unknown> | null> {
-  const snap = await getDoc(doc(db, 'backups', uid));
-  return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
-}
-
-export async function logoutUser(): Promise<void> {
-  await signOut(auth);
+  const snap = await getDoc(doc(db, 'users', uid, 'backup', 'latest'));
+  if (!snap.exists()) return null;
+  return snap.data();
 }
