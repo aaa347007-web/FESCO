@@ -20,10 +20,10 @@ import {
   Plus,
   PlusCircle,
   Search,
-  Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
   Store,
+  User as UserIcon,
   X,
   Zap,
 } from 'lucide-react';
@@ -75,7 +75,7 @@ const NAV_ITEMS: {
   { id: 'bills', label: 'All Bills', mobileLabel: 'Bills', icon: FileSpreadsheet },
   { id: 'months', label: 'Monthly History', mobileLabel: 'Months', icon: CalendarDays },
   { id: 'reports', label: 'Reports & Backup', mobileLabel: 'Reports', icon: DatabaseBackup },
-  { id: 'settings', label: 'Settings', mobileLabel: 'Settings', icon: SettingsIcon },
+  { id: 'settings', label: 'My Profile', mobileLabel: 'Me', icon: UserIcon },
 ];
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -1011,11 +1011,16 @@ export default function App() {
             {activeTab === 'settings' && (
               <SettingsView
                 settings={settings}
+                user={cloudUser}
                 dbInfo={dbInfo}
                 onSaved={async () => {
                   await refreshData();
-                  showToast('Settings saved!');
+                  showToast('Profile updated!');
                 }}
+                onUserUpdated={(updatedUser) => {
+                  setCloudUser(updatedUser);
+                }}
+                onLogout={handleQuickLogout}
                 onError={(msg) => showToast(msg, 'error')}
               />
             )}
