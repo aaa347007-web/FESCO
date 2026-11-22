@@ -5,17 +5,19 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  updateEmail,
   updatePassword,
   type User,
 } from 'firebase/auth';
 import {
+  deleteDoc,
   doc,
   getDoc,
   getFirestore,
   setDoc,
 } from 'firebase/firestore';
 
-// ⚠️ Apni purani firebase.ts se apna firebaseConfig yahan paste karein
+// ⚠️ Apni purani firebase.ts se firebaseConfig keys yahan check kar lein
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'YOUR_API_KEY',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'YOUR_AUTH_DOMAIN',
@@ -86,7 +88,6 @@ export async function signUpWithPhonePin(
     { merge: true }
   );
 
-  // Phone-to-UID index for PIN recovery
   await setDoc(doc(db, 'phone_accounts', cleanPhone), {
     uid: cred.user.uid,
     phone: cleanPhone,
@@ -104,13 +105,69 @@ export async function signInWithPhonePin(phone: string, pin: string): Promise<Us
 
   const cred = await signInWithEmailAndPassword(auth, email, password);
 
-  // Keep phone_accounts synced for future PIN recovery
   await setDoc(
     doc(db, 'phone_accounts', cleanPhone),
     {
       uid: cred.user.uid,
       phone: cleanPhone,
       currentPin: String(pin).replace(/\D/g, ''),
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+
+  return cred.user;
+}
+
+// Update Mobile Number & 6-Digit PIN from SettingsView
+export async function updateUserMobileAndPin(
+  newPhone: string,
+  currentPin: string,
+  newPin?: string
+): Promise<User> {
+  const user = auth.currentUser;
+  if (!user || !user.email) {
+    throw new Error('Pehle apne account mein login karein.');
+  }
+
+  const oldPhone = emailToPhone(user.email);
+  const cleanNewPhone = normalizePakPhone(newPhone);
+  const cleanCurrentPin = String(currentPin || '').replace(/\D/g, '');
+  const cleanTargetPin = newPin && newPin.trim()
+    ? String(newPin).replace(/\D/g, '')
+    : cleanCurrentPin;
+
+  // Re-authenticate with current PIN before sensitive update
+  const cred = await signInWithEmailAndPassword(
+    auth,
+    user.email,
+    pinToPassword(cleanCurrentPin)
+  );
+
+  if (cleanNewPhone !== oldPhone) {
+    await updateEmail(cred.user, phoneToEmail(cleanNewPhone));
+    await deleteDoc(doc(db, 'phone_accounts', oldPhone)).catch(() => {});
+  }
+
+  if (cleanTargetPin !== cleanCurrentPin) {
+    await updatePassword(cred.user, pinToPassword(cleanTargetPin));
+  }
+
+  await setDoc(
+    doc(db, 'users', cred.user.uid),
+    {
+      phone: cleanNewPhone,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+
+  await setDoc(
+    doc(db, 'phone_accounts', cleanNewPhone),
+    {
+      uid: cred.user.uid,
+      phone: cleanNewPhone,
+      currentPin: cleanTargetPin,
       updatedAt: new Date().toISOString(),
     },
     { merge: true }
@@ -126,7 +183,6 @@ export async function sendForgotPinOtp(
 ): Promise<ConfirmationResult> {
   const cleanPhone = normalizePakPhone(phone);
 
-  // Check if account exists
   const accountSnap = await getDoc(doc(db, 'phone_accounts', cleanPhone));
   if (!accountSnap.exists()) {
     throw new Error('Is mobile number par koi account nahi bana hua.');
@@ -152,7 +208,7 @@ export async function sendForgotPinOtp(
   return {
     phone: cleanPhone,
     otp,
-    expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
+    expiresAt: Date.now() + 5 * 60 * 1000,
   };
 }
 
@@ -186,7 +242,6 @@ export async function verifyOtpAndResetPin(
   const oldPin = String(accountSnap.data()?.currentPin || '');
   const email = phoneToEmail(cleanPhone);
 
-  // Sign in with previous PIN, update Firebase Auth password to new PIN
   const cred = await signInWithEmailAndPassword(auth, email, pinToPassword(oldPin));
   await updatePassword(cred.user, pinToPassword(cleanNewPin));
 
