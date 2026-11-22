@@ -23,13 +23,13 @@ import {
 } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD0gk_j2W_N24ht00LpKVNfRcijYfdjwwg",
+  apiKey: "AIzaSyD0gK_jzW_NZ4hz00LpKXNfRxiJyYdlwmg",
   authDomain: "pak-bill-manager.firebaseapp.com",
   projectId: "pak-bill-manager",
   storageBucket: "pak-bill-manager.firebasestorage.app",
   messagingSenderId: "747696391606",
-  appId: "1:747696391606:web:4c6b567a23629e0c122d17",
-  measurementId: "G-1KLNH9RW4W"
+  appId: "1:747696391606:web:4cbb507a23629e0c122d17",
+  measurementId: "G-1KLNH9RM4W"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -115,7 +115,6 @@ export async function signUpWithPhonePin(phone: string, pin: string, shopName?: 
   if (!/^\d{6}$/.test(pin)) {
     throw new Error('6-hindso ka PIN likhein (maslan 123456)');
   }
-
   await setPersistence(auth, browserLocalPersistence);
   const email = phoneToEmail(cleanPhone);
   const cred = await createUserWithEmailAndPassword(auth, email, pin);
@@ -152,7 +151,6 @@ export async function signInWithPhonePin(phone: string, pin: string) {
   if (!/^\d{6}$/.test(pin)) {
     throw new Error('6-hindso ka PIN likhein');
   }
-
   await setPersistence(auth, browserLocalPersistence);
 
   const dirSnap = await getDoc(doc(db, 'phone_directory', cleanPhone));
