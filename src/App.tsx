@@ -17,7 +17,6 @@ import {
   LogOut,
   MessageSquareCode,
   Phone,
-  Plus,
   PlusCircle,
   Search,
   ShieldCheck,
@@ -850,15 +849,6 @@ export default function App() {
               <span className="hidden sm:inline">
                 {cloudSyncing ? 'Syncing...' : 'Cloud Active'}
               </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('add')}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-blue-700 px-3 text-xs font-extrabold text-white shadow-xs transition hover:bg-blue-800"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Bill</span>
             </button>
 
             <button
