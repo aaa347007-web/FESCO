@@ -947,16 +947,22 @@ export default function App() {
 
             {activeTab === 'add' && (
               <AddBillView
-                settings={settings}
+                suggestedSerial={stats?.nextSerialNumber ?? (dbInfo?.totalBills ?? 0) + 1}
+                defaultCommission={settings.default_commission}
+                currencyCode={settings.currency_code}
                 prefillCompany={prefillAdd.company}
-                prefillRefNo={prefillAdd.refNo}
-                onBillAdded={async (msg) => {
+                prefillReference={prefillAdd.refNo}
+                recentBills={stats?.recentBills ?? []}
+                togglingId={togglingId}
+                onBillCreated={async (bill) => {
                   setPrefillAdd({ company: 'FESCO', refNo: '' });
                   await refreshData();
-                  showToast(msg);
-                  setActiveTab('dashboard');
+                  showToast(`Bill #${bill.serial_number} saved!`);
                 }}
-                onError={(msg) => showToast(msg, 'error')}
+                onToggleStatus={handleToggleStatus}
+                onEditBill={setEditingBill}
+                onDeleteBill={setDeletingBill}
+                onViewHistory={setHistoryBillId}
               />
             )}
 
