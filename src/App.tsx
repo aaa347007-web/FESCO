@@ -97,6 +97,34 @@ const DEFAULT_SETTINGS: AppSettings = {
   updated_at: '',
 };
 
+async function wipeLocalAppStorage(): Promise<void> {
+  try {
+    localStorage.clear();
+  } catch {
+    // Ignore storage error
+  }
+  try {
+    if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
+      const dbs = await indexedDB.databases();
+      await Promise.all(
+        dbs.map((dbInfo) => {
+          if (!dbInfo.name || dbInfo.name.toLowerCase().includes('firebase')) {
+            return Promise.resolve();
+          }
+          return new Promise<void>((resolve) => {
+            const req = indexedDB.deleteDatabase(dbInfo.name!);
+            req.onsuccess = () => resolve();
+            req.onerror = () => resolve();
+            req.onblocked = () => resolve();
+          });
+        })
+      );
+    }
+  } catch {
+    // Ignore IndexedDB error
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -150,6 +178,7 @@ export default function App() {
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const isRestoringRef = useRef(false);
+  const isFreshSignUpRef = useRef(false);
 
   // Full-Screen Welcome Gate Form States
   const [authMode, setAuthMode] = useState<'signup' | 'signin' | 'forgot'>('signup');
@@ -280,14 +309,21 @@ export default function App() {
         const sub = await getUserProStatus(u.uid, phoneStr);
         setProStatus(sub);
 
+        if (isFreshSignUpRef.current) {
+          isFreshSignUpRef.current = false;
+          return;
+        }
+
         try {
           isRestoringRef.current = true;
           const cloudData = await loadCloudBackup(u.uid);
           if (cloudData && Array.isArray(cloudData.bills)) {
-            await api.restoreBackup(cloudData as Parameters<typeof api.restoreBackup>[0], 'merge');
-            await loadAll();
-            setRefreshKey((k) => k + 1);
+            await api.restoreBackup(cloudData as Parameters<typeof api.restoreBackup>[0], 'replace');
+          } else {
+            await wipeLocalAppStorage();
           }
+          await loadAll();
+          setRefreshKey((k) => k + 1);
         } catch {
           // Ignore offline error
         } finally {
@@ -315,13 +351,23 @@ export default function App() {
 
     isRestoringRef.current = true;
     try {
-      if (!isNewAccount) {
+      if (isNewAccount) {
+        await wipeLocalAppStorage();
+        await api.updateSettings({
+          shop_name: authShopName.trim() || 'Pak Bill Manager',
+          owner_name: 'Shop Counter',
+        });
+        await loadAll();
+        setRefreshKey((k) => k + 1);
+      } else {
         const cloudData = await loadCloudBackup(loggedInUser.uid);
         if (cloudData && Array.isArray(cloudData.bills)) {
-          await api.restoreBackup(cloudData as Parameters<typeof api.restoreBackup>[0], 'merge');
-          await loadAll();
-          setRefreshKey((k) => k + 1);
+          await api.restoreBackup(cloudData as Parameters<typeof api.restoreBackup>[0], 'replace');
+        } else {
+          await wipeLocalAppStorage();
         }
+        await loadAll();
+        setRefreshKey((k) => k + 1);
       }
     } finally {
       isRestoringRef.current = false;
@@ -377,14 +423,13 @@ export default function App() {
     setAuthBusy(true);
     try {
       if (authMode === 'signup') {
+        isFreshSignUpRef.current = true;
+        await wipeLocalAppStorage();
         const newUser = await signUpWithPhonePin(authPhone, authPin, authShopName);
-        if (authShopName.trim()) {
-          await api.updateSettings({ shop_name: authShopName.trim() });
-          await loadAll();
-        }
         await handleCloudAuthSuccess(newUser, true);
-        showToast('Account ban gaya aur data cloud par mehfooz ho gaya!');
+        showToast('Naya account ban gaya! Aap ka apna fresh hisab shuru ho gaya hai.');
       } else {
+        await wipeLocalAppStorage();
         const existingUser = await signInWithPhonePin(authPhone, authPin);
         await handleCloudAuthSuccess(existingUser, false);
         showToast('Login kamyab! Aap ka hisab sync ho gaya.');
@@ -392,6 +437,7 @@ export default function App() {
       setAuthPin('');
       setAuthConfirmPin('');
     } catch (err) {
+      isFreshSignUpRef.current = false;
       setAuthError(mapFirebaseAuthError(err));
     } finally {
       setAuthBusy(false);
@@ -429,6 +475,7 @@ export default function App() {
 
     setAuthBusy(true);
     try {
+      await wipeLocalAppStorage();
       const recoveredUser = await verifyOtpAndResetPin(
         authConfirmation,
         authOtpCode,
@@ -447,8 +494,13 @@ export default function App() {
 
   const handleQuickLogout = async () => {
     try {
+      await wipeLocalAppStorage();
+      setStats(null);
+      setMonths([]);
+      setSettings(DEFAULT_SETTINGS);
+      setActiveTab('dashboard');
       await logoutUser();
-      showToast('Aap apne account se logout ho gaye hain.');
+      showToast('Aap logout ho gaye hain aur local data saaf kar diya gaya hai.');
     } catch {
       showToast('Logout mein masla aaya.', 'error');
     }
