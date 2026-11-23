@@ -48,6 +48,12 @@ export interface ConfirmationResult {
   expiresAt: number;
 }
 
+export interface ProSubscription {
+  isPro: boolean;
+  planType: 'free' | 'monthly' | 'yearly';
+  expiresAt: string | null;
+}
+
 export function normalizePakPhone(rawPhone: string): string {
   let digits = rawPhone.replace(/\D/g, '');
   if (digits.startsWith('92') && digits.length === 12) {
@@ -217,13 +223,11 @@ export async function updateUserMobileAndPin(params: {
     throw new Error('Naya mobile number ya naya PIN pehle wale se mukhtalif hona chahiye.');
   }
 
-  // Re-authenticate user with current PIN if email/password provider is linked
   if (user.email) {
     const credential = EmailAuthProvider.credential(user.email, params.currentPin);
     await reauthenticateWithCredential(user, credential);
   }
 
-  // Check if new phone is already taken by another account
   if (phoneChanged) {
     const targetDirSnap = await getDoc(doc(db, 'phone_directory', cleanNewPhone));
     if (targetDirSnap.exists() && targetDirSnap.data().primaryUid !== user.uid) {
@@ -237,7 +241,6 @@ export async function updateUserMobileAndPin(params: {
     await updatePassword(user, params.newPin);
   }
 
-  // Update Firestore profile & phone_directory
   await setDoc(
     doc(db, 'users', user.uid, 'profile', 'info'),
     {
@@ -392,4 +395,108 @@ export async function loadCloudBackup(uid: string): Promise<Record<string, unkno
   const snap = await getDoc(doc(db, 'users', uid, 'backup', 'latest'));
   if (!snap.exists()) return null;
   return snap.data();
+}
+
+// --- PRO SUBSCRIPTION & ADMIN ACTIVATION ---
+export async function getUserProStatus(uid: string, phoneNumber?: string): Promise<ProSubscription> {
+  try {
+    const userRef = doc(db, 'users', uid);
+    const snap = await getDoc(userRef);
+
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.plan === 'pro' && data.proExpiresAt) {
+        const expTime = new Date(data.proExpiresAt).getTime();
+        if (expTime > Date.now()) {
+          return {
+            isPro: true,
+            planType: data.planType || 'monthly',
+            expiresAt: data.proExpiresAt,
+          };
+        }
+      }
+    }
+
+    if (phoneNumber) {
+      const cleanPhone = normalizePakPhone(phoneNumber);
+      if (cleanPhone) {
+        const phoneRef = doc(db, 'phone_directory', cleanPhone);
+        const phoneSnap = await getDoc(phoneRef);
+        if (phoneSnap.exists()) {
+          const pData = phoneSnap.data();
+          if (pData.plan === 'pro' && pData.proExpiresAt) {
+            const expTime = new Date(pData.proExpiresAt).getTime();
+            if (expTime > Date.now()) {
+              await setDoc(
+                userRef,
+                {
+                  plan: 'pro',
+                  planType: pData.planType || 'monthly',
+                  proExpiresAt: pData.proExpiresAt,
+                },
+                { merge: true }
+              );
+              return {
+                isPro: true,
+                planType: pData.planType || 'monthly',
+                expiresAt: pData.proExpiresAt,
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Offline fallback
+  }
+  return { isPro: false, planType: 'free', expiresAt: null };
+}
+
+export async function adminSetUserProPlan(
+  targetPhone: string,
+  planType: 'monthly' | 'yearly' | 'free'
+): Promise<string> {
+  const digits = normalizePakPhone(targetPhone);
+  if (!/^03\d{9}$/.test(digits)) {
+    throw new Error('Sahih 11-hindso wala mobile number likhein (maslan 03001234567).');
+  }
+
+  const phoneRef = doc(db, 'phone_directory', digits);
+  const phoneSnap = await getDoc(phoneRef);
+
+  const days = planType === 'yearly' ? 365 : planType === 'monthly' ? 30 : 0;
+  const expiresAt = days > 0 ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+  const planStatus = planType === 'free' ? 'free' : 'pro';
+
+  await setDoc(
+    phoneRef,
+    {
+      phone: digits,
+      plan: planStatus,
+      planType,
+      proExpiresAt: expiresAt,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const targetUid = phoneSnap.exists()
+    ? phoneSnap.data()?.primaryUid || phoneSnap.data()?.uid
+    : null;
+
+  if (targetUid) {
+    await setDoc(
+      doc(db, 'users', targetUid),
+      {
+        plan: planStatus,
+        planType,
+        proExpiresAt: expiresAt,
+      },
+      { merge: true }
+    );
+  }
+
+  return planType === 'free'
+    ? `${digits} ko Free plan par wapas kar diya gaya hai.`
+    : `${digits} ka ${planType === 'yearly' ? '1 Year Pro' : '1 Month Pro'} activate ho gaya!`;
 }
