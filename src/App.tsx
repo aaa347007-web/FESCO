@@ -340,7 +340,7 @@ export default function App() {
       const result = await sendForgotPinOtp(authPhone, 'welcome-recaptcha-container');
       setAuthConfirmation(result);
       setForgotStep('otp');
-      showToast('6-hindso ka SMS OTP code aap ke mobile par bhej diya gaya hai!');
+      showToast('6-hindso ka WhatsApp OTP code aap ke WhatsApp par bhej diya gaya hai!');
     } catch (err) {
       setAuthError(mapFirebaseAuthError(err));
     } finally {
@@ -353,7 +353,7 @@ export default function App() {
     setAuthError('');
 
     if (!authConfirmation) {
-      setAuthError('Pehle mobile number par OTP mangwayein.');
+      setAuthError('Pehle apne WhatsApp number par OTP mangwayein.');
       return;
     }
     if (authPin !== authConfirmPin) {
@@ -378,6 +378,7 @@ export default function App() {
       setAuthBusy(false);
     }
   };
+
   const handleQuickLogout = async () => {
     try {
       await logoutUser();
@@ -466,11 +467,11 @@ export default function App() {
               )}
             </div>
             <h1 className="mt-3 text-xl font-extrabold tracking-tight">
-              {authMode === 'forgot' ? 'PIN Recovery (SMS OTP)' : 'Pak Bill Manager'}
+              {authMode === 'forgot' ? 'PIN Recovery (WhatsApp OTP)' : 'Pak Bill Manager'}
             </h1>
             <p className="mt-1 text-xs text-blue-100">
               {authMode === 'forgot'
-                ? 'Mobile Number par SMS Code Mangwa Kar Naya PIN Lagayein'
+                ? 'Apne WhatsApp Number par Verification Code Mangwa Kar Naya PIN Lagayein'
                 : 'Apne Mobile Number aur 6-Digit PIN se Account Banayein ya Login Karein'}
             </p>
           </div>
@@ -489,17 +490,17 @@ export default function App() {
 
                 {forgotStep === 'phone' ? (
                   <form onSubmit={handleWelcomeSendOtp} className="space-y-4">
-                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
-                      Apna registered mobile number likhein. Aap ke number par{' '}
-                      <strong>6-hindso ka free SMS OTP code</strong> aayega.
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
+                      Apna registered <strong>WhatsApp number</strong> likhein. Aap ke WhatsApp par{' '}
+                      <strong>6-hindso ka free OTP code</strong> aayega.
                     </div>
 
                     <div>
                       <label className="mb-1 block text-xs font-bold text-slate-700">
-                        Mobile Number (11 Hindse)
+                        WhatsApp Number (11 Hindse)
                       </label>
                       <div className="relative">
-                        <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-600" />
                         <input
                           type="tel"
                           inputMode="tel"
@@ -510,7 +511,7 @@ export default function App() {
                             setAuthPhone(e.target.value.replace(/\D/g, '').slice(0, 11))
                           }
                           placeholder="03001234567"
-                          className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 font-mono text-base font-bold tracking-wider text-slate-900 outline-none focus:border-blue-600"
+                          className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 font-mono text-base font-bold tracking-wider text-slate-900 outline-none focus:border-emerald-600"
                         />
                       </div>
                     </div>
@@ -525,25 +526,27 @@ export default function App() {
                     <button
                       type="submit"
                       disabled={authBusy}
-                      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60"
+                      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
                     >
                       <MessageSquareCode className="h-4 w-4" />
-                      <span>{authBusy ? 'SMS OTP bheja ja raha hai...' : 'Send SMS OTP Code'}</span>
+                      <span>
+                        {authBusy ? 'WhatsApp OTP bheja ja raha hai...' : 'Send WhatsApp OTP Code'}
+                      </span>
                     </button>
                   </form>
                 ) : (
                   <form onSubmit={handleWelcomeVerifyReset} className="space-y-4">
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                      <strong>{authPhone}</strong> par bheja gaya 6-hindso ka SMS code daalein aur
-                      apna naya 6-Digit PIN set karein.
+                      Aap ke WhatsApp number <strong>{authPhone}</strong> par 6-hindso ka code bhej
+                      diya gaya hai. Code daal kar apna naya 6-Digit PIN set karein.
                     </div>
 
                     <div>
                       <label className="mb-1 block text-xs font-bold text-slate-700">
-                        6-Digit SMS OTP Code
+                        6-Digit WhatsApp OTP Code
                       </label>
                       <div className="relative">
-                        <MessageSquareCode className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <MessageSquareCode className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-600" />
                         <input
                           type="text"
                           inputMode="numeric"
@@ -554,7 +557,7 @@ export default function App() {
                             setAuthOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
                           }
                           placeholder="123456"
-                          className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 font-mono text-base font-bold tracking-widest text-slate-900 outline-none focus:border-blue-600"
+                          className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3.5 font-mono text-base font-bold tracking-widest text-slate-900 outline-none focus:border-emerald-600"
                         />
                       </div>
                     </div>
@@ -681,7 +684,7 @@ export default function App() {
 
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700">
-                      Mobile Number (11 Hindse)
+                      WhatsApp / Mobile Number (11 Hindse)
                     </label>
                     <div className="relative">
                       <Phone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
