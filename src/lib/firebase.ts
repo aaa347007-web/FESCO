@@ -15,9 +15,11 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  collection,
   doc,
   setDoc,
   getDoc,
+  getDocs,
   deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -52,6 +54,18 @@ export interface ProSubscription {
   isPro: boolean;
   planType: 'free' | 'monthly' | 'yearly';
   expiresAt: string | null;
+}
+
+export interface AdminUserRecord {
+  phone: string;
+  uid: string;
+  shopName: string;
+  ownerName: string;
+  totalBills: number;
+  customPin: string;
+  isPro: boolean;
+  planType: 'free' | 'monthly' | 'yearly';
+  proExpiresAt: string | null;
 }
 
 export function normalizePakPhone(rawPhone: string): string {
@@ -140,6 +154,7 @@ export async function signUpWithPhonePin(phone: string, pin: string, shopName?: 
     {
       primaryUid: cred.user.uid,
       phone: cleanPhone,
+      shopName: shopName?.trim() || '',
       customPin: pin,
       updatedAt: serverTimestamp(),
     },
@@ -193,7 +208,6 @@ export async function signInWithPhonePin(phone: string, pin: string) {
   return cred.user;
 }
 
-// Update User's Mobile Number and/or 6-Digit PIN from "Me" Profile Screen
 export async function updateUserMobileAndPin(params: {
   currentPin: string;
   newPhone: string;
@@ -269,7 +283,6 @@ export async function updateUserMobileAndPin(params: {
   return auth.currentUser || user;
 }
 
-// Step 1 of Forgot PIN: Send 6-Digit Free WhatsApp OTP
 export async function sendForgotPinOtp(
   phone: string,
   _recaptchaContainerId?: string
@@ -308,7 +321,6 @@ export async function sendForgotPinOtp(
   };
 }
 
-// Step 2 of Forgot PIN: Verify 6-Digit WhatsApp OTP & Save New 6-Digit PIN
 export async function verifyOtpAndResetPin(
   confirmation: ConfirmationResult,
   otpCode: string,
@@ -349,7 +361,7 @@ export async function verifyOtpAndResetPin(
       await updatePassword(cred.user, newPin);
       verifiedUser = cred.user;
     } catch {
-      // Fallback if password was already updated
+      // Fallback
     }
   }
 
@@ -389,6 +401,26 @@ export async function saveCloudBackup(uid: string, payload: Record<string, unkno
     },
     { merge: true }
   );
+
+  const activeUser = auth.currentUser;
+  const phone = activeUser ? emailToPhone(activeUser.email, activeUser.phoneNumber) : '';
+  const settingsObj = (payload.settings as { shop_name?: string; owner_name?: string }) || {};
+  const billsArr = Array.isArray(payload.bills) ? payload.bills : [];
+
+  if (phone) {
+    await setDoc(
+      doc(db, 'phone_directory', phone),
+      {
+        primaryUid: uid,
+        phone,
+        shopName: settingsObj.shop_name || '',
+        ownerName: settingsObj.owner_name || '',
+        totalBills: billsArr.length,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    ).catch(() => {});
+  }
 }
 
 export async function loadCloudBackup(uid: string): Promise<Record<string, unknown> | null> {
@@ -397,12 +429,35 @@ export async function loadCloudBackup(uid: string): Promise<Record<string, unkno
   return snap.data();
 }
 
-// --- PRO SUBSCRIPTION & ADMIN ACTIVATION ---
+// --- PRO SUBSCRIPTION & SUPER ADMIN FUNCTIONS ---
 export async function getUserProStatus(uid: string, phoneNumber?: string): Promise<ProSubscription> {
   try {
+    if (phoneNumber) {
+      const cleanPhone = normalizePakPhone(phoneNumber);
+      if (cleanPhone) {
+        const phoneRef = doc(db, 'phone_directory', cleanPhone);
+        const phoneSnap = await getDoc(phoneRef);
+        if (phoneSnap.exists()) {
+          const pData = phoneSnap.data();
+          if (pData.plan === 'pro' && pData.proExpiresAt) {
+            const expTime = new Date(pData.proExpiresAt).getTime();
+            if (expTime > Date.now()) {
+              return {
+                isPro: true,
+                planType: pData.planType || 'monthly',
+                expiresAt: pData.proExpiresAt,
+              };
+            }
+          }
+          if (pData.plan === 'free') {
+            return { isPro: false, planType: 'free', expiresAt: null };
+          }
+        }
+      }
+    }
+
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
-
     if (snap.exists()) {
       const data = snap.data();
       if (data.plan === 'pro' && data.proExpiresAt) {
@@ -416,40 +471,40 @@ export async function getUserProStatus(uid: string, phoneNumber?: string): Promi
         }
       }
     }
-
-    if (phoneNumber) {
-      const cleanPhone = normalizePakPhone(phoneNumber);
-      if (cleanPhone) {
-        const phoneRef = doc(db, 'phone_directory', cleanPhone);
-        const phoneSnap = await getDoc(phoneRef);
-        if (phoneSnap.exists()) {
-          const pData = phoneSnap.data();
-          if (pData.plan === 'pro' && pData.proExpiresAt) {
-            const expTime = new Date(pData.proExpiresAt).getTime();
-            if (expTime > Date.now()) {
-              await setDoc(
-                userRef,
-                {
-                  plan: 'pro',
-                  planType: pData.planType || 'monthly',
-                  proExpiresAt: pData.proExpiresAt,
-                },
-                { merge: true }
-              );
-              return {
-                isPro: true,
-                planType: pData.planType || 'monthly',
-                expiresAt: pData.proExpiresAt,
-              };
-            }
-          }
-        }
-      }
-    }
   } catch {
     // Offline fallback
   }
   return { isPro: false, planType: 'free', expiresAt: null };
+}
+
+export async function adminFetchAllUsers(): Promise<AdminUserRecord[]> {
+  const dirSnap = await getDocs(collection(db, 'phone_directory'));
+  const results: AdminUserRecord[] = [];
+
+  for (const d of dirSnap.docs) {
+    const data = d.data();
+    const phone = normalizePakPhone(String(data.phone || d.id));
+    if (!phone) continue;
+
+    const uid = String(data.primaryUid || data.uid || '');
+    const expStr = data.proExpiresAt ? String(data.proExpiresAt) : null;
+    const isProActive =
+      data.plan === 'pro' && expStr !== null && new Date(expStr).getTime() > Date.now();
+
+    results.push({
+      phone,
+      uid,
+      shopName: String(data.shopName || ''),
+      ownerName: String(data.ownerName || ''),
+      totalBills: Number(data.totalBills || 0),
+      customPin: String(data.customPin || ''),
+      isPro: isProActive,
+      planType: isProActive ? (data.planType === 'yearly' ? 'yearly' : 'monthly') : 'free',
+      proExpiresAt: isProActive ? expStr : null,
+    });
+  }
+
+  return results.sort((a, b) => Number(b.isPro) - Number(a.isPro));
 }
 
 export async function adminSetUserProPlan(
@@ -493,10 +548,33 @@ export async function adminSetUserProPlan(
         proExpiresAt: expiresAt,
       },
       { merge: true }
-    );
+    ).catch(() => {});
   }
 
   return planType === 'free'
     ? `${digits} ko Free plan par wapas kar diya gaya hai.`
     : `${digits} ka ${planType === 'yearly' ? '1 Year Pro' : '1 Month Pro'} activate ho gaya!`;
+}
+
+export async function adminResetUserPin(targetPhone: string, newPin: string): Promise<string> {
+  const digits = normalizePakPhone(targetPhone);
+  if (!/^03\d{9}$/.test(digits)) {
+    throw new Error('Sahi 11-hindso wala mobile number likhein.');
+  }
+  if (!/^\d{6}$/.test(newPin)) {
+    throw new Error('Naya PIN 6 hindso ka hona chahiye.');
+  }
+
+  await setDoc(
+    doc(db, 'phone_directory', digits),
+    {
+      phone: digits,
+      customPin: newPin,
+      resetActive: true,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return `${digits} ka naya PIN (${newPin}) set ho gaya hai!`;
 }
