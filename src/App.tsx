@@ -32,11 +32,12 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { AdsterraBanner } from './components/AdsterraBanner';
 import { BillHistoryModal } from './components/BillHistoryModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { EditBillModal } from './components/EditBillModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
-import { hideBannerAd, initAdMobAndShowBanner, showInterstitialAd } from './lib/admob';
+import { hideBannerAd } from './lib/admob';
 import { api } from './lib/api';
 import {
   auth,
@@ -310,13 +311,9 @@ export default function App() {
       ]
     : baseNavItems;
 
-  // Control AdMob Ads based on Pro Status
+  // Ensure native AdMob banner stays hidden while Adsterra is active
   useEffect(() => {
-    if (proStatus.isPro) {
-      hideBannerAd();
-    } else if (!authChecking && cloudUser) {
-      initAdMobAndShowBanner();
-    }
+    hideBannerAd();
   }, [proStatus.isPro, authChecking, cloudUser]);
 
   // Load user's pending request when opening Pro modal
@@ -629,11 +626,8 @@ export default function App() {
     }
   };
 
-  const handleTabChange = async (tab: NavTab) => {
+  const handleTabChange = (tab: NavTab) => {
     setActiveTab(tab);
-    if (tab === 'reports' && !proStatus.isPro) {
-      await showInterstitialAd();
-    }
   };
 
   const handleToggleStatus = async (bill: Bill, nextStatus: PaymentStatus) => {
@@ -682,7 +676,6 @@ export default function App() {
   if (authChecking) {
     return (
       <div className="relative flex min-h-screen flex-col items-center justify-between overflow-hidden bg-gradient-to-b from-sky-50 via-white to-blue-50/80 px-5 py-10 text-slate-900">
-        {/* Subtle geometric grid backdrop */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:22px_22px] opacity-45"
@@ -694,7 +687,6 @@ export default function App() {
         </div>
 
         <div className="relative z-10 flex w-full max-w-xs flex-col items-center text-center">
-          {/* 3D Floating Cobalt-Blue Icon Card */}
           <div className="relative">
             <div className="absolute -inset-2.5 animate-pulse rounded-3xl bg-blue-500/15 blur-md" />
             <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-xl shadow-blue-700/25 ring-4 ring-white">
@@ -709,7 +701,6 @@ export default function App() {
             پاک بل مینیجر — بجلی، گیس اور پی ٹی سی ایل کھاتہ
           </p>
 
-          {/* Compact White Glass Status Card with Animated Green Checkmarks */}
           <div className="mt-6 w-full space-y-2.5 rounded-3xl border border-slate-200/90 bg-white/85 p-4 text-left shadow-lg shadow-slate-200/60 backdrop-blur-md">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-700">
@@ -1117,7 +1108,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20 text-slate-900 lg:pb-8">
+    <div
+      className={`min-h-screen bg-slate-50 text-slate-900 ${
+        proStatus.isPro ? 'pb-20 lg:pb-8' : 'pb-36 lg:pb-20'
+      }`}
+    >
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xs">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
@@ -1390,6 +1385,9 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* ADSTERRA 320x50 BANNER (HIDDEN AUTOMATICALLY FOR PRO VIP USERS) */}
+      <AdsterraBanner isPro={proStatus.isPro} />
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-xs lg:hidden">
         <div className={`grid py-1 ${isAdminUser ? 'grid-cols-7' : 'grid-cols-6'}`}>
@@ -1676,7 +1674,11 @@ export default function App() {
       />
 
       {toast && (
-        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 lg:bottom-6">
+        <div
+          className={`fixed left-1/2 z-50 -translate-x-1/2 ${
+            proStatus.isPro ? 'bottom-20 lg:bottom-6' : 'bottom-28 lg:bottom-16'
+          }`}
+        >
           <div
             className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-extrabold text-white shadow-lg ${
               toast.tone === 'error' ? 'bg-red-600' : 'bg-slate-900'
