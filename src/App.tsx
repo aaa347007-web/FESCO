@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  Clock,
   Cloud,
   CloudOff,
   Crown,
@@ -12,6 +13,7 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  ImagePlus,
   KeyRound,
   LayoutDashboard,
   Loader2,
@@ -24,6 +26,7 @@ import {
   ShieldCheck,
   Sparkles,
   Store,
+  Upload,
   User as UserIcon,
   X,
   Zap,
@@ -38,6 +41,7 @@ import { api } from './lib/api';
 import {
   auth,
   emailToPhone,
+  getUserPendingProRequest,
   getUserProStatus,
   loadCloudBackup,
   logoutUser,
@@ -47,8 +51,10 @@ import {
   sendForgotPinOtp,
   signInWithPhonePin,
   signUpWithPhonePin,
+  submitProPaymentProof,
   verifyOtpAndResetPin,
   type ConfirmationResult,
+  type ProPaymentRequest,
   type ProSubscription,
   type User,
 } from './lib/firebase';
@@ -97,11 +103,38 @@ const DEFAULT_SETTINGS: AppSettings = {
   updated_at: '',
 };
 
+async function compressScreenshotToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxWidth = 720;
+        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(String(reader.result));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.65));
+      };
+      img.onerror = () => reject(new Error('Image load nahi ho saki.'));
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => reject(new Error('File read nahi ho saki.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function wipeLocalAppStorage(): Promise<void> {
   try {
     localStorage.clear();
   } catch {
-    // Ignore storage error
+    // Ignore
   }
   try {
     if (typeof indexedDB !== 'undefined' && typeof indexedDB.databases === 'function') {
@@ -121,7 +154,7 @@ async function wipeLocalAppStorage(): Promise<void> {
       );
     }
   } catch {
-    // Ignore IndexedDB error
+    // Ignore
   }
 }
 
@@ -160,7 +193,7 @@ export default function App() {
   } | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
-  // Pro Subscription States
+  // Pro Subscription & Direct Screenshot Upload States
   const [proStatus, setProStatus] = useState<ProSubscription>({
     isPro: false,
     planType: 'free',
@@ -168,6 +201,10 @@ export default function App() {
   });
   const [proModalOpen, setProModalOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
+  const [screenshotData, setScreenshotData] = useState<string>('');
+  const [transactionId, setTransactionId] = useState<string>('');
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [existingRequest, setExistingRequest] = useState<ProPaymentRequest | null>(null);
 
   // Auth & Cloud Sync States
   const [authChecking, setAuthChecking] = useState(true);
@@ -218,6 +255,14 @@ export default function App() {
     }
   }, [proStatus.isPro, authChecking, cloudUser]);
 
+  // Load user's pending request when opening Pro modal
+  useEffect(() => {
+    if (!proModalOpen || !currentUserPhone || proStatus.isPro) return;
+    getUserPendingProRequest(currentUserPhone).then((req) => {
+      setExistingRequest(req);
+    });
+  }, [proModalOpen, currentUserPhone, proStatus.isPro]);
+
   // Automatic Check for New GitHub Release APK
   useEffect(() => {
     if (!CURRENT_BUILD_NUMBER) return;
@@ -250,7 +295,7 @@ export default function App() {
           });
         }
       } catch {
-        // Offline or network busy — silently ignore
+        // Offline or network busy
       }
     };
 
@@ -299,7 +344,7 @@ export default function App() {
         new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       );
     } catch {
-      // Offline mode: local storage remains intact
+      // Offline mode
     } finally {
       setCloudSyncing(false);
     }
@@ -380,13 +425,45 @@ export default function App() {
     await syncNowToCloud(loggedInUser);
   };
 
-  const openWhatsAppPaymentProof = () => {
-    const planLabel =
-      selectedPlan === 'yearly' ? 'Yearly Pro (Rs. 2,000 / Year)' : 'Monthly Pro (Rs. 300 / Month)';
-    const msg = encodeURIComponent(
-      `Assalam-o-Alaikum Zahid Bhai!\n\nMaine *Pak Bill Manager* ka *${planLabel}* khareedne ke liye payment bhej di hai.\n\nMera Registered Number: *${currentUserPhone || '03XXXXXXXXX'}*\n\nScreenshot attach kar raha hoon, please mera Pro Ad-Free version activate kar dein.`
-    );
-    window.open(`https://wa.me/92${PAYMENT_NUMBER.slice(1)}?text=${msg}`, '_blank');
+  const handleScreenshotFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressScreenshotToBase64(file);
+      setScreenshotData(compressed);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Screenshot select nahi ho saka.', 'error');
+    }
+  };
+
+  const handleSubmitPaymentProof = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cloudUser || !currentUserPhone) return;
+    if (!screenshotData) {
+      showToast('Pehle payment ka screenshot select karein.', 'error');
+      return;
+    }
+
+    setUploadingProof(true);
+    try {
+      await submitProPaymentProof({
+        uid: cloudUser.uid,
+        phone: currentUserPhone,
+        shopName: settings.shop_name,
+        planType: selectedPlan,
+        transactionId,
+        screenshotBase64: screenshotData,
+      });
+      const updatedReq = await getUserPendingProRequest(currentUserPhone);
+      setExistingRequest(updatedReq);
+      setScreenshotData('');
+      setTransactionId('');
+      showToast('Screenshot upload ho gaya! Admin approve karte hi Pro active ho jayega.');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Screenshot upload mein masla aaya.', 'error');
+    } finally {
+      setUploadingProof(false);
+    }
   };
 
   const switchWelcomeMode = (nextMode: 'signup' | 'signin' | 'forgot') => {
@@ -1203,10 +1280,10 @@ export default function App() {
         </div>
       </nav>
 
-      {/* GO PRO (AD-FREE SUBSCRIPTION) MODAL FOR CUSTOMERS */}
+      {/* GO PRO (AD-FREE SUBSCRIPTION) WITH DIRECT SCREENSHOT UPLOAD */}
       {proModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
+          <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-600 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Crown className="h-5 w-5" />
@@ -1306,20 +1383,82 @@ export default function App() {
                       <span className="text-slate-600">Account Title:</span>
                       <span className="font-bold text-slate-900">{PAYMENT_ACCOUNT_TITLE}</span>
                     </div>
-                    <p className="mt-2 text-[11px] text-slate-500">
-                      Payment bhejne ke baad neeche button daba kar WhatsApp par screenshot bhejein —
-                      5 minute mein Pro active ho jayega.
-                    </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={openWhatsAppPaymentProof}
-                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700"
+                  {existingRequest && existingRequest.status === 'pending' && (
+                    <div className="flex items-start gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                      <Clock className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+                      <div>
+                        <strong>Aap ki Request Pending Hai!</strong> Aap ne{' '}
+                        <strong>
+                          {existingRequest.planType === 'yearly' ? 'Yearly (Rs. 2,000)' : 'Monthly (Rs. 300)'}
+                        </strong>{' '}
+                        ka screenshot upload kar diya hai — Admin jald verify karke Pro active kar dega.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* DIRECT PAYMENT SCREENSHOT UPLOAD SECTION */}
+                  <form
+                    onSubmit={handleSubmitPaymentProof}
+                    className="space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/40 p-3.5"
                   >
-                    <MessageSquareCode className="h-4 w-4" />
-                    <span>Send Payment Screenshot on WhatsApp</span>
-                  </button>
+                    <div className="text-xs font-extrabold text-emerald-950">
+                      Payment Screenshot Upload Karein:
+                    </div>
+
+                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-emerald-300 bg-white p-3 text-center transition hover:bg-emerald-50">
+                      {screenshotData ? (
+                        <div className="space-y-1.5">
+                          <img
+                            src={screenshotData}
+                            alt="Selected Screenshot"
+                            className="mx-auto max-h-36 rounded-lg object-contain shadow-2xs"
+                          />
+                          <div className="text-[11px] font-bold text-emerald-700">
+                            Screenshot select ho gaya (Tabdeel karne ke liye tap karein)
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <ImagePlus className="h-7 w-7 text-emerald-600" />
+                          <span className="mt-1 text-xs font-extrabold text-slate-800">
+                            Gallery se Payment Screenshot Chunein
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            JazzCash / Easypaisa receipt ki tasveer upload karein
+                          </span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleScreenshotFileChange}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <div>
+                      <input
+                        type="text"
+                        value={transactionId}
+                        onChange={(e) => setTransactionId(e.target.value)}
+                        placeholder="Transaction ID / TID (Optional)"
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-emerald-600"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={uploadingProof || !screenshotData}
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-extrabold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      <Upload className="h-4 w-4" />
+                      <span>
+                        {uploadingProof ? 'Upload ho raha hai...' : 'Submit Payment Screenshot'}
+                      </span>
+                    </button>
+                  </form>
                 </>
               )}
             </div>
