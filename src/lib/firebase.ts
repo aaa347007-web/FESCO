@@ -56,6 +56,19 @@ export interface ProSubscription {
   expiresAt: string | null;
 }
 
+export interface ProPaymentRequest {
+  id: string;
+  uid: string;
+  phone: string;
+  shopName: string;
+  planType: 'monthly' | 'yearly';
+  amount: number;
+  transactionId: string;
+  screenshotBase64: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
 export interface AdminUserRecord {
   phone: string;
   uid: string;
@@ -429,7 +442,7 @@ export async function loadCloudBackup(uid: string): Promise<Record<string, unkno
   return snap.data();
 }
 
-// --- PRO SUBSCRIPTION & SUPER ADMIN FUNCTIONS ---
+// --- PRO SUBSCRIPTION, SCREENSHOT UPLOAD & SUPER ADMIN FUNCTIONS ---
 export async function getUserProStatus(uid: string, phoneNumber?: string): Promise<ProSubscription> {
   try {
     if (phoneNumber) {
@@ -475,6 +488,83 @@ export async function getUserProStatus(uid: string, phoneNumber?: string): Promi
     // Offline fallback
   }
   return { isPro: false, planType: 'free', expiresAt: null };
+}
+
+export async function submitProPaymentProof(params: {
+  uid: string;
+  phone: string;
+  shopName: string;
+  planType: 'monthly' | 'yearly';
+  transactionId?: string;
+  screenshotBase64: string;
+}): Promise<void> {
+  const cleanPhone = normalizePakPhone(params.phone);
+  if (!cleanPhone) {
+    throw new Error('User phone number nahi mila.');
+  }
+  if (!params.screenshotBase64) {
+    throw new Error('Pehle payment ka screenshot select karein.');
+  }
+
+  const amount = params.planType === 'yearly' ? 2000 : 300;
+  await setDoc(doc(db, 'pro_requests', cleanPhone), {
+    id: cleanPhone,
+    uid: params.uid,
+    phone: cleanPhone,
+    shopName: params.shopName || 'Shop Counter',
+    planType: params.planType,
+    amount,
+    transactionId: (params.transactionId || '').trim(),
+    screenshotBase64: params.screenshotBase64,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function getUserPendingProRequest(phone: string): Promise<ProPaymentRequest | null> {
+  const cleanPhone = normalizePakPhone(phone);
+  if (!cleanPhone) return null;
+  try {
+    const snap = await getDoc(doc(db, 'pro_requests', cleanPhone));
+    if (!snap.exists()) return null;
+    return snap.data() as ProPaymentRequest;
+  } catch {
+    return null;
+  }
+}
+
+export async function adminFetchPendingRequests(): Promise<ProPaymentRequest[]> {
+  const snap = await getDocs(collection(db, 'pro_requests'));
+  const list: ProPaymentRequest[] = [];
+  for (const d of snap.docs) {
+    const data = d.data() as ProPaymentRequest;
+    if (data.status === 'pending') {
+      list.push({ ...data, id: d.id });
+    }
+  }
+  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+}
+
+export async function adminResolveProRequest(
+  req: ProPaymentRequest,
+  decision: 'approve' | 'reject'
+): Promise<string> {
+  if (decision === 'approve') {
+    await adminSetUserProPlan(req.phone, req.planType);
+    await setDoc(
+      doc(db, 'pro_requests', req.id),
+      { status: 'approved', resolvedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    return `${req.phone} (${req.shopName}) ka ${req.planType === 'yearly' ? '1 Year Pro' : '1 Month Pro'} approve aur activate ho gaya!`;
+  } else {
+    await setDoc(
+      doc(db, 'pro_requests', req.id),
+      { status: 'rejected', resolvedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    return `${req.phone} ki payment request reject kar di gayi.`;
+  }
 }
 
 export async function adminFetchAllUsers(): Promise<AdminUserRecord[]> {
