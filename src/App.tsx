@@ -5,7 +5,6 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  Clock,
   Cloud,
   CloudOff,
   Crown,
@@ -15,6 +14,7 @@ import {
   FileSpreadsheet,
   ImagePlus,
   KeyRound,
+  Languages,
   LayoutDashboard,
   Loader2,
   Lock,
@@ -32,7 +32,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { BillHistoryModal } from './components/BillHistoryModal';
-import { CloudSyncModal } from './components/CloudSyncModal';
 import { ConfirmModal } from './components/ConfirmModal';
 import { EditBillModal } from './components/EditBillModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -69,6 +68,7 @@ import { ReportsBackupView } from './views/ReportsBackupView';
 import { SettingsView } from './views/SettingsView';
 
 type NavTab = 'dashboard' | 'add' | 'bills' | 'months' | 'reports' | 'settings' | 'admin';
+type AppLang = 'en' | 'ur';
 
 const ADMIN_PHONE = '03417208670';
 const PAYMENT_ACCOUNT_TITLE = 'Zahid Nawaz';
@@ -77,20 +77,6 @@ const PAYMENT_NUMBER = '03417208670';
 const CURRENT_BUILD_NUMBER = Number(import.meta.env.VITE_APP_BUILD_NUMBER || 0);
 const GITHUB_LATEST_RELEASE_API =
   'https://api.github.com/repos/aaa347007-web/FESCO/releases/latest';
-
-const BASE_NAV_ITEMS: {
-  id: NavTab;
-  label: string;
-  mobileLabel: string;
-  icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { id: 'dashboard', label: 'Dashboard', mobileLabel: 'Home', icon: LayoutDashboard },
-  { id: 'add', label: 'Add Bill', mobileLabel: 'Add', icon: PlusCircle },
-  { id: 'bills', label: 'All Bills', mobileLabel: 'Bills', icon: FileSpreadsheet },
-  { id: 'months', label: 'Monthly History', mobileLabel: 'Months', icon: CalendarDays },
-  { id: 'reports', label: 'Reports & Backup', mobileLabel: 'Reports', icon: DatabaseBackup },
-  { id: 'settings', label: 'My Profile', mobileLabel: 'Me', icon: UserIcon },
-];
 
 const DEFAULT_SETTINGS: AppSettings = {
   id: 1,
@@ -131,8 +117,10 @@ async function compressScreenshotToBase64(file: File): Promise<string> {
 }
 
 async function wipeLocalAppStorage(): Promise<void> {
+  const savedLang = localStorage.getItem('pakbill_lang');
   try {
     localStorage.clear();
+    if (savedLang) localStorage.setItem('pakbill_lang', savedLang);
   } catch {
     // Ignore
   }
@@ -159,6 +147,23 @@ async function wipeLocalAppStorage(): Promise<void> {
 }
 
 export default function App() {
+  const [lang, setLang] = useState<AppLang>(() => {
+    const saved = localStorage.getItem('pakbill_lang');
+    return saved === 'ur' ? 'ur' : 'en';
+  });
+  const isUr = lang === 'ur';
+
+  const toggleLanguage = () => {
+    const next: AppLang = lang === 'en' ? 'ur' : 'en';
+    setLang(next);
+    try {
+      localStorage.setItem('pakbill_lang', next);
+    } catch {
+      // Ignore
+    }
+    showToast(next === 'ur' ? 'زبان اردو منتخب کر لی گئی ہے' : 'Language switched to English');
+  };
+
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [months, setMonths] = useState<MonthlySummary[]>([]);
@@ -206,12 +211,9 @@ export default function App() {
   const [uploadingProof, setUploadingProof] = useState(false);
   const [existingRequest, setExistingRequest] = useState<ProPaymentRequest | null>(null);
 
-  // Auth & Cloud Sync States
+  // Auth & Silent Auto Cloud Sync States
   const [authChecking, setAuthChecking] = useState(true);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
-  const [cloudModalOpen, setCloudModalOpen] = useState(false);
-  const [cloudSyncing, setCloudSyncing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const isRestoringRef = useRef(false);
   const isFreshSignUpRef = useRef(false);
 
@@ -239,12 +241,61 @@ export default function App() {
     : '';
   const isAdminUser = currentUserPhone === ADMIN_PHONE;
 
+  const baseNavItems: {
+    id: NavTab;
+    label: string;
+    mobileLabel: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    {
+      id: 'dashboard',
+      label: isUr ? 'ڈیش بورڈ' : 'Dashboard',
+      mobileLabel: isUr ? 'ہوم' : 'Home',
+      icon: LayoutDashboard,
+    },
+    {
+      id: 'add',
+      label: isUr ? 'نیا بل' : 'Add Bill',
+      mobileLabel: isUr ? 'اندراج' : 'Add',
+      icon: PlusCircle,
+    },
+    {
+      id: 'bills',
+      label: isUr ? 'تمام بلز' : 'All Bills',
+      mobileLabel: isUr ? 'بلز' : 'Bills',
+      icon: FileSpreadsheet,
+    },
+    {
+      id: 'months',
+      label: isUr ? 'ماہانہ ریکارڈ' : 'Monthly History',
+      mobileLabel: isUr ? 'ماہانہ' : 'Months',
+      icon: CalendarDays,
+    },
+    {
+      id: 'reports',
+      label: isUr ? 'رپورٹس اور بیک اپ' : 'Reports & Backup',
+      mobileLabel: isUr ? 'رپورٹس' : 'Reports',
+      icon: DatabaseBackup,
+    },
+    {
+      id: 'settings',
+      label: isUr ? 'میری پروفائل' : 'My Profile',
+      mobileLabel: isUr ? 'پروفائل' : 'Me',
+      icon: UserIcon,
+    },
+  ];
+
   const navItems = isAdminUser
     ? [
-        ...BASE_NAV_ITEMS,
-        { id: 'admin' as NavTab, label: 'Admin Panel', mobileLabel: 'Admin', icon: ShieldCheck },
+        ...baseNavItems,
+        {
+          id: 'admin' as NavTab,
+          label: isUr ? 'ایڈمن پینل' : 'Admin Panel',
+          mobileLabel: isUr ? 'ایڈمن' : 'Admin',
+          icon: ShieldCheck,
+        },
       ]
-    : BASE_NAV_ITEMS;
+    : baseNavItems;
 
   // Control AdMob Ads based on Pro Status
   useEffect(() => {
@@ -336,17 +387,11 @@ export default function App() {
   const syncNowToCloud = useCallback(async (targetUser?: User | null) => {
     const activeUser = targetUser ?? auth.currentUser;
     if (!activeUser || isRestoringRef.current) return;
-    setCloudSyncing(true);
     try {
       const backupPayload = await api.exportBackup('all');
       await saveCloudBackup(activeUser.uid, backupPayload as Record<string, unknown>);
-      setLastSyncedAt(
-        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      );
     } catch {
-      // Offline mode
-    } finally {
-      setCloudSyncing(false);
+      // Offline mode: local storage remains intact
     }
   }, []);
 
@@ -1024,7 +1069,11 @@ export default function App() {
                 type="text"
                 value={globalSearch}
                 onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="Search customer, serial #, or 14-digit ref..."
+                placeholder={
+                  isUr
+                    ? 'کسٹمر کا نام، سیریل نمبر یا حوالہ نمبر تلاش کریں...'
+                    : 'Search customer, serial #, or 14-digit ref...'
+                }
                 className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-900 outline-none focus:border-blue-600 focus:bg-white"
               />
             </div>
@@ -1041,7 +1090,7 @@ export default function App() {
                 title="Open Super Admin Dashboard"
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
-                <span>Admin Panel</span>
+                <span>{isUr ? 'ایڈمن پینل' : 'Admin Panel'}</span>
               </button>
             ) : (
               <button
@@ -1055,27 +1104,28 @@ export default function App() {
                 title="Pro Ad-Free Version"
               >
                 <Crown className="h-3.5 w-3.5" />
-                <span>{proStatus.isPro ? 'Pro VIP' : 'Go Pro'}</span>
+                <span>
+                  {proStatus.isPro ? (isUr ? 'پرو VIP' : 'Pro VIP') : isUr ? 'پرو بنیں' : 'Go Pro'}
+                </span>
               </button>
             )}
 
+            {/* URDU / ENGLISH LANGUAGE TOGGLE BUTTON */}
             <button
               type="button"
-              onClick={() => setCloudModalOpen(true)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
-              title="Cloud Backup & Sync"
+              onClick={toggleLanguage}
+              className="inline-flex h-9 items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-extrabold text-blue-800 transition hover:bg-blue-100"
+              title="Switch Language (English / اردو)"
             >
-              <Cloud className={`h-3.5 w-3.5 ${cloudSyncing ? 'animate-pulse' : ''}`} />
-              <span className="hidden sm:inline">
-                {cloudSyncing ? 'Syncing...' : 'Cloud Active'}
-              </span>
+              <Languages className="h-3.5 w-3.5" />
+              <span>{isUr ? 'EN' : 'اردو'}</span>
             </button>
 
             <button
               type="button"
               onClick={handleQuickLogout}
               aria-label="Logout"
-              title="Logout"
+              title={isUr ? 'لاگ آؤٹ' : 'Logout'}
               className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
             >
               <LogOut className="h-4 w-4" />
@@ -1287,7 +1337,9 @@ export default function App() {
             <div className="flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-600 px-5 py-4 text-white">
               <div className="flex items-center gap-2">
                 <Crown className="h-5 w-5" />
-                <h2 className="text-base font-extrabold">Pak Bill Manager — Pro (No Ads)</h2>
+                <h2 className="text-base font-extrabold">
+                  {isUr ? 'پاک بل مینیجر — پرو (بغیر اشتہار)' : 'Pak Bill Manager — Pro (No Ads)'}
+                </h2>
               </div>
               <button
                 type="button"
@@ -1305,7 +1357,7 @@ export default function App() {
                     <Check className="h-5 w-5" />
                   </div>
                   <h3 className="mt-2 text-sm font-extrabold text-emerald-950">
-                    Aap Ka Pro VIP Version Active Hai!
+                    {isUr ? 'آپ کا پرو VIP ورژن فعال ہے!' : 'Aap Ka Pro VIP Version Active Hai!'}
                   </h3>
                   <p className="mt-1 text-xs text-emerald-800">
                     Plan: <strong>{proStatus.planType === 'yearly' ? 'Yearly Pro' : 'Monthly Pro'}</strong>{' '}
@@ -1322,15 +1374,27 @@ export default function App() {
                   <div className="space-y-2 text-xs text-slate-700">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>100% Ads Khatam (Koi Banner ya Popup Ad nahi aayega)</span>
+                      <span>
+                        {isUr
+                          ? '100% اشتہارات ختم (کوئی بینر یا پوپ اپ ایڈ نہیں آئے گا)'
+                          : '100% Ads Khatam (Koi Banner ya Popup Ad nahi aayega)'}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>Tez-tareen Shop Counter Experience + VIP Pro Badge</span>
+                      <span>
+                        {isUr
+                          ? 'تیز ترین دکان کاؤنٹر تجربہ + VIP پرو بیج'
+                          : 'Tez-tareen Shop Counter Experience + VIP Pro Badge'}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>24/7 Priority WhatsApp Support</span>
+                      <span>
+                        {isUr
+                          ? '24/7 ترجیحی واٹس ایپ سپورٹ'
+                          : '24/7 Priority WhatsApp Support'}
+                      </span>
                     </div>
                   </div>
 
@@ -1344,9 +1408,13 @@ export default function App() {
                           : 'border-slate-200 bg-white'
                       }`}
                     >
-                      <div className="text-[11px] font-bold text-slate-500">Monthly Plan</div>
+                      <div className="text-[11px] font-bold text-slate-500">
+                        {isUr ? 'ماہانہ پلان' : 'Monthly Plan'}
+                      </div>
                       <div className="mt-1 text-lg font-black text-slate-900">Rs. 300</div>
-                      <div className="text-[10px] font-semibold text-slate-500">1 Mahina Ad-Free</div>
+                      <div className="text-[10px] font-semibold text-slate-500">
+                        {isUr ? '1 مہینہ بغیر اشتہار' : '1 Mahina Ad-Free'}
+                      </div>
                     </button>
 
                     <button
@@ -1361,26 +1429,34 @@ export default function App() {
                       <span className="absolute -top-2.5 right-2 rounded-full bg-emerald-600 px-2 py-0.5 text-[9px] font-extrabold text-white">
                         Save Rs. 1,600
                       </span>
-                      <div className="text-[11px] font-bold text-amber-800">Yearly Best Value</div>
+                      <div className="text-[11px] font-bold text-amber-800">
+                        {isUr ? 'سالانہ بہترین پلان' : 'Yearly Best Value'}
+                      </div>
                       <div className="mt-1 text-lg font-black text-slate-900">Rs. 2,000</div>
                       <div className="text-[10px] font-semibold text-emerald-700">
-                        Poora Saal Ad-Free
+                        {isUr ? 'پورا سال بغیر اشتہار' : 'Poora Saal Ad-Free'}
                       </div>
                     </button>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-xs">
                     <div className="font-extrabold text-slate-900">
-                      JazzCash / Easypaisa Account Details:
+                      {isUr
+                        ? 'جاز کیش / ایزی پیسہ اکاؤنٹ تفصیلات:'
+                        : 'JazzCash / Easypaisa Account Details:'}
                     </div>
                     <div className="mt-1.5 flex items-center justify-between">
-                      <span className="text-slate-600">Account Number:</span>
+                      <span className="text-slate-600">
+                        {isUr ? 'اکاؤنٹ نمبر:' : 'Account Number:'}
+                      </span>
                       <span className="font-mono text-sm font-black text-blue-700">
                         {PAYMENT_NUMBER}
                       </span>
                     </div>
                     <div className="mt-1 flex items-center justify-between">
-                      <span className="text-slate-600">Account Title:</span>
+                      <span className="text-slate-600">
+                        {isUr ? 'اکاؤنٹ نام:' : 'Account Title:'}
+                      </span>
                       <span className="font-bold text-slate-900">{PAYMENT_ACCOUNT_TITLE}</span>
                     </div>
                   </div>
@@ -1404,7 +1480,9 @@ export default function App() {
                     className="space-y-3 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/40 p-3.5"
                   >
                     <div className="text-xs font-extrabold text-emerald-950">
-                      Payment Screenshot Upload Karein:
+                      {isUr
+                        ? 'ادائیگی کا اسکرین شاٹ اپ لوڈ کریں:'
+                        : 'Payment Screenshot Upload Karein:'}
                     </div>
 
                     <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-emerald-300 bg-white p-3 text-center transition hover:bg-emerald-50">
@@ -1416,17 +1494,23 @@ export default function App() {
                             className="mx-auto max-h-36 rounded-lg object-contain shadow-2xs"
                           />
                           <div className="text-[11px] font-bold text-emerald-700">
-                            Screenshot select ho gaya (Tabdeel karne ke liye tap karein)
+                            {isUr
+                              ? 'اسکرین شاٹ منتخب ہو گیا (تبدیل کرنے کے لیے دبائیں)'
+                              : 'Screenshot select ho gaya (Tabdeel karne ke liye tap karein)'}
                           </div>
                         </div>
                       ) : (
                         <>
                           <ImagePlus className="h-7 w-7 text-emerald-600" />
                           <span className="mt-1 text-xs font-extrabold text-slate-800">
-                            Gallery se Payment Screenshot Chunein
+                            {isUr
+                              ? 'گیلری سے ادائیگی کا اسکرین شاٹ چنیں'
+                              : 'Gallery se Payment Screenshot Chunein'}
                           </span>
                           <span className="text-[10px] text-slate-500">
-                            JazzCash / Easypaisa receipt ki tasveer upload karein
+                            {isUr
+                              ? 'جاز کیش / ایزی پیسہ رسید کی تصویر اپ لوڈ کریں'
+                              : 'JazzCash / Easypaisa receipt ki tasveer upload karein'}
                           </span>
                         </>
                       )}
@@ -1443,7 +1527,11 @@ export default function App() {
                         type="text"
                         value={transactionId}
                         onChange={(e) => setTransactionId(e.target.value)}
-                        placeholder="Transaction ID / TID (Optional)"
+                        placeholder={
+                          isUr
+                            ? 'ٹرانزیکشن آئی ڈی / TID (اختیاری)'
+                            : 'Transaction ID / TID (Optional)'
+                        }
                         className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-900 outline-none focus:border-emerald-600"
                       />
                     </div>
@@ -1455,7 +1543,13 @@ export default function App() {
                     >
                       <Upload className="h-4 w-4" />
                       <span>
-                        {uploadingProof ? 'Upload ho raha hai...' : 'Submit Payment Screenshot'}
+                        {uploadingProof
+                          ? isUr
+                            ? 'اپ لوڈ ہو رہا ہے...'
+                            : 'Upload ho raha hai...'
+                          : isUr
+                          ? 'اسکرین شاٹ جمع کروائیں'
+                          : 'Submit Payment Screenshot'}
                       </span>
                     </button>
                   </form>
@@ -1465,18 +1559,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      <CloudSyncModal
-        open={cloudModalOpen}
-        user={cloudUser}
-        syncing={cloudSyncing}
-        lastSyncedAt={lastSyncedAt}
-        defaultShopName={settings.shop_name}
-        onClose={() => setCloudModalOpen(false)}
-        onAuthSuccess={handleCloudAuthSuccess}
-        onManualSync={() => syncNowToCloud()}
-        onToast={showToast}
-      />
 
       <EditBillModal
         bill={editingBill}
