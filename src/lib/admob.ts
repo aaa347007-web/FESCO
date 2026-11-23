@@ -9,6 +9,8 @@ interface AdMobPlugin {
     margin?: number;
     isTesting?: boolean;
   }): Promise<void>;
+  hideBanner(): Promise<void>;
+  removeBanner(): Promise<void>;
   prepareInterstitial(options: { adId: string; isTesting?: boolean }): Promise<void>;
   showInterstitial(): Promise<void>;
 }
@@ -41,6 +43,16 @@ export async function initAdMobAndShowBanner(): Promise<void> {
     await preloadInterstitial();
   } catch (err) {
     console.warn('AdMob init/banner skipped:', err);
+  }
+}
+
+export async function hideBannerAd(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await AdMob.hideBanner();
+    await AdMob.removeBanner();
+  } catch {
+    // Already hidden or not shown yet
   }
 }
 
