@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  Clock,
   Cloud,
   CloudOff,
   Crown,
@@ -213,6 +214,7 @@ export default function App() {
 
   // Auth & Silent Auto Cloud Sync States
   const [authChecking, setAuthChecking] = useState(true);
+  const [splashStep, setSplashStep] = useState(1);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const isRestoringRef = useRef(false);
   const isFreshSignUpRef = useRef(false);
@@ -235,6 +237,17 @@ export default function App() {
   const showToast = useCallback((message: string, tone: 'success' | 'error' = 'success') => {
     setToast({ message, tone });
   }, []);
+
+  // Step-by-step animated checkmarks on Style 3 Splash Screen
+  useEffect(() => {
+    if (!authChecking) return;
+    const t1 = setTimeout(() => setSplashStep(2), 450);
+    const t2 = setTimeout(() => setSplashStep(3), 900);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [authChecking]);
 
   const currentUserPhone = cloudUser
     ? emailToPhone(cloudUser.email, cloudUser.phoneNumber).replace(/\D/g, '')
@@ -665,16 +678,86 @@ export default function App() {
     setActiveTab('bills');
   };
 
+  // STYLE 3: CLEAN MODERN GLASS CARD SPLASH SCREEN
   if (authChecking) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 text-slate-900">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-700 text-white shadow-md">
-          <Zap className="h-7 w-7" />
+      <div className="relative flex min-h-screen flex-col items-center justify-between overflow-hidden bg-gradient-to-b from-sky-50 via-white to-blue-50/80 px-5 py-10 text-slate-900">
+        {/* Subtle geometric grid backdrop */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:22px_22px] opacity-45"
+        />
+
+        <div className="relative z-10 inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-white/90 px-3.5 py-1 text-[11px] font-extrabold text-blue-800 shadow-2xs">
+          <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+          <span>PAKISTAN&apos;S SMART SHOP KHATA</span>
         </div>
-        <h1 className="mt-4 text-lg font-extrabold">Pak Bill Manager</h1>
-        <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500">
-          <Loader2 className="h-4 w-4 animate-spin text-blue-700" />
-          <span>Account check ho raha hai...</span>
+
+        <div className="relative z-10 flex w-full max-w-xs flex-col items-center text-center">
+          {/* 3D Floating Cobalt-Blue Icon Card */}
+          <div className="relative">
+            <div className="absolute -inset-2.5 animate-pulse rounded-3xl bg-blue-500/15 blur-md" />
+            <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-xl shadow-blue-700/25 ring-4 ring-white">
+              <Zap className="h-10 w-10" />
+            </div>
+          </div>
+
+          <h1 className="mt-5 text-2xl font-black tracking-tight text-slate-900">
+            Pak Bill Manager
+          </h1>
+          <p className="mt-1 text-xs font-bold text-blue-800">
+            پاک بل مینیجر — بجلی، گیس اور پی ٹی سی ایل کھاتہ
+          </p>
+
+          {/* Compact White Glass Status Card with Animated Green Checkmarks */}
+          <div className="mt-6 w-full space-y-2.5 rounded-3xl border border-slate-200/90 bg-white/85 p-4 text-left shadow-lg shadow-slate-200/60 backdrop-blur-md">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-700">
+                {isUr ? 'اکاؤنٹ کی تصدیق' : 'Account Verified'}
+              </span>
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                <Check className="h-3.5 w-3.5 stroke-[3]" />
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs">
+              <span
+                className={`font-bold transition-colors ${
+                  splashStep >= 2 ? 'text-slate-700' : 'text-slate-400'
+                }`}
+              >
+                {isUr ? 'کلاؤڈ بیک اپ محفوظ' : 'Cloud Synced'}
+              </span>
+              {splashStep >= 2 ? (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <Check className="h-3.5 w-3.5 stroke-[3]" />
+                </span>
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-xs">
+              <span
+                className={`font-bold transition-colors ${
+                  splashStep >= 3 ? 'text-slate-700' : 'text-slate-400'
+                }`}
+              >
+                {isUr ? 'کاؤنٹر تیار ہے' : 'Ready'}
+              </span>
+              {splashStep >= 3 ? (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <Check className="h-3.5 w-3.5 stroke-[3]" />
+                </span>
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-10 text-center text-[11px] font-bold text-slate-400">
+          Powered by Pak Fintechs
         </div>
       </div>
     );
