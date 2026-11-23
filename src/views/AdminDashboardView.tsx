@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Check,
   CheckCircle2,
+  Clock,
   Crown,
+  Image as ImageIcon,
   KeyRound,
   Loader2,
   MessageSquareCode,
@@ -11,12 +14,16 @@ import {
   ShieldCheck,
   Store,
   Users,
+  X,
 } from 'lucide-react';
 import {
   adminFetchAllUsers,
+  adminFetchPendingRequests,
   adminResetUserPin,
+  adminResolveProRequest,
   adminSetUserProPlan,
   type AdminUserRecord,
+  type ProPaymentRequest,
 } from '../lib/firebase';
 
 interface AdminDashboardViewProps {
@@ -29,6 +36,8 @@ export function AdminDashboardView({
   onAdminSelfPlanChanged,
 }: AdminDashboardViewProps) {
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<ProPaymentRequest[]>([]);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'pro' | 'free'>('all');
@@ -42,11 +51,15 @@ export function AdminDashboardView({
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await adminFetchAllUsers();
+      const [list, reqs] = await Promise.all([
+        adminFetchAllUsers(),
+        adminFetchPendingRequests(),
+      ]);
       setUsers(list);
+      setPendingRequests(reqs);
     } catch (err) {
       onToast(
-        err instanceof Error ? err.message : 'Users load karne mein masla aaya. Firestore Rules check karein.',
+        err instanceof Error ? err.message : 'Data load karne mein masla aaya. Firestore Rules check karein.',
         'error'
       );
     } finally {
@@ -84,6 +97,25 @@ export function AdminDashboardView({
       );
     });
   }, [users, search, filter]);
+
+  const handleRequestAction = async (
+    req: ProPaymentRequest,
+    decision: 'approve' | 'reject'
+  ) => {
+    setBusyPhone(req.phone);
+    try {
+      const msg = await adminResolveProRequest(req, decision);
+      onToast(msg);
+      await loadUsers();
+      if (req.phone === '03417208670' && onAdminSelfPlanChanged) {
+        onAdminSelfPlanChanged();
+      }
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : 'Request process nahi ho saki.', 'error');
+    } finally {
+      setBusyPhone(null);
+    }
+  };
 
   const handlePlanUpdate = async (
     targetPhone: string,
@@ -154,7 +186,7 @@ export function AdminDashboardView({
               Super Admin Dashboard — Zahid Nawaz
             </h2>
             <p className="text-xs text-slate-300">
-              Tamam Users, Pro Subscriptions, aur Customer Support ek hi jagah control karein
+              Payment Screenshots Approve karein, Users dekhein, aur Support dein
             </p>
           </div>
         </div>
@@ -165,9 +197,90 @@ export function AdminDashboardView({
           className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white/15 px-3.5 text-xs font-extrabold text-white transition hover:bg-white/25 disabled:opacity-50"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh List</span>
+          <span>Refresh</span>
         </button>
       </div>
+
+      {/* PENDING PAYMENT SCREENSHOTS SECTION */}
+      {pendingRequests.length > 0 && (
+        <div className="rounded-3xl border-2 border-amber-400 bg-amber-50/70 p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-black text-amber-950">
+            <Clock className="h-5 w-5 text-amber-600" />
+            <span>
+              Nayi Payment Requests ({pendingRequests.length}) — Screenshot Check Karke Approve Karein
+            </span>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {pendingRequests.map((req) => {
+              const isBusy = busyPhone === req.phone;
+              return (
+                <div
+                  key={req.id}
+                  className="flex flex-col justify-between rounded-2xl border border-amber-300 bg-white p-4 shadow-2xs"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="text-sm font-extrabold text-slate-900">{req.shopName}</div>
+                      <div className="font-mono text-xs font-bold text-blue-700">{req.phone}</div>
+                      <div className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-black text-amber-900">
+                        {req.planType === 'yearly'
+                          ? 'Yearly Pro — Rs. 2,000'
+                          : 'Monthly Pro — Rs. 300'}
+                      </div>
+                      {req.transactionId && (
+                        <div className="text-[11px] font-semibold text-slate-600">
+                          TID: <span className="font-mono font-bold">{req.transactionId}</span>
+                        </div>
+                      )}
+                      <div className="text-[10px] text-slate-400">
+                        {new Date(req.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage(req.screenshotBase64)}
+                      className="group relative h-24 w-20 shrink-0 overflow-hidden rounded-xl border border-slate-300 bg-slate-100"
+                      title="Full Screenshot Dekhein"
+                    >
+                      <img
+                        src={req.screenshotBase64}
+                        alt="Payment Proof"
+                        className="h-full w-full object-cover"
+                      />
+                      <span className="absolute inset-x-0 bottom-0 bg-black/70 py-0.5 text-[9px] font-bold text-white">
+                        Zoom
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => handleRequestAction(req, 'approve')}
+                      className="flex h-9 items-center justify-center gap-1 rounded-xl bg-emerald-600 px-3 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      <Check className="h-4 w-4" />
+                      <span>Approve & Activate</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => handleRequestAction(req, 'reject')}
+                      className="flex h-9 items-center justify-center gap-1 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                    >
+                      <X className="h-4 w-4" />
+                      <span>Reject</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -269,7 +382,11 @@ export function AdminDashboardView({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {tab === 'all' ? `All (${stats.total})` : tab === 'pro' ? `Pro (${stats.proCount})` : `Free (${stats.freeCount})`}
+              {tab === 'all'
+                ? `All (${stats.total})`
+                : tab === 'pro'
+                ? `Pro (${stats.proCount})`
+                : `Free (${stats.freeCount})`}
             </button>
           ))}
         </div>
@@ -346,7 +463,6 @@ export function AdminDashboardView({
                   </button>
                 </div>
 
-                {/* Action Buttons */}
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
                   <button
                     type="button"
@@ -386,7 +502,6 @@ export function AdminDashboardView({
                   </button>
                 </div>
 
-                {/* Inline PIN Reset Box */}
                 {pinResetPhone === u.phone && (
                   <div className="mt-2.5 flex items-center gap-2 rounded-xl bg-slate-50 p-2.5">
                     <input
@@ -415,7 +530,29 @@ export function AdminDashboardView({
           })}
         </div>
       )}
+
+      {/* Full-Screen Screenshot Preview Modal */}
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+        >
+          <div className="relative max-h-[90vh] max-w-md overflow-hidden rounded-2xl bg-white p-2">
+            <button
+              type="button"
+              onClick={() => setPreviewImage(null)}
+              className="absolute right-3 top-3 rounded-full bg-black/70 p-1.5 text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={previewImage}
+              alt="Full Payment Proof"
+              className="max-h-[82vh] w-auto rounded-xl object-contain"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
-          }
-      
+}
