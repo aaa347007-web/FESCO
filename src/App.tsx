@@ -36,7 +36,6 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { hideBannerAd, initAdMobAndShowBanner, showInterstitialAd } from './lib/admob';
 import { api } from './lib/api';
 import {
-  adminSetUserProPlan,
   auth,
   emailToPhone,
   getUserProStatus,
@@ -56,13 +55,14 @@ import {
 import { formatCurrency } from './lib/format';
 import type { AppSettings, Bill, DashboardStats, MonthlySummary, PaymentStatus } from './types/bill';
 import { AddBillView } from './views/AddBillView';
+import { AdminDashboardView } from './views/AdminDashboardView';
 import { AllBillsView } from './views/AllBillsView';
 import { DashboardView } from './views/DashboardView';
 import { MonthlyHistoryView } from './views/MonthlyHistoryView';
 import { ReportsBackupView } from './views/ReportsBackupView';
 import { SettingsView } from './views/SettingsView';
 
-type NavTab = 'dashboard' | 'add' | 'bills' | 'months' | 'reports' | 'settings';
+type NavTab = 'dashboard' | 'add' | 'bills' | 'months' | 'reports' | 'settings' | 'admin';
 
 const ADMIN_PHONE = '03417208670';
 const PAYMENT_ACCOUNT_TITLE = 'Zahid Nawaz';
@@ -72,7 +72,7 @@ const CURRENT_BUILD_NUMBER = Number(import.meta.env.VITE_APP_BUILD_NUMBER || 0);
 const GITHUB_LATEST_RELEASE_API =
   'https://api.github.com/repos/aaa347007-web/FESCO/releases/latest';
 
-const NAV_ITEMS: {
+const BASE_NAV_ITEMS: {
   id: NavTab;
   label: string;
   mobileLabel: string;
@@ -160,7 +160,7 @@ export default function App() {
   } | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
-  // Pro Subscription & Admin States
+  // Pro Subscription States
   const [proStatus, setProStatus] = useState<ProSubscription>({
     isPro: false,
     planType: 'free',
@@ -168,8 +168,6 @@ export default function App() {
   });
   const [proModalOpen, setProModalOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('yearly');
-  const [adminTargetPhone, setAdminTargetPhone] = useState('');
-  const [adminBusy, setAdminBusy] = useState(false);
 
   // Auth & Cloud Sync States
   const [authChecking, setAuthChecking] = useState(true);
@@ -203,6 +201,13 @@ export default function App() {
     ? emailToPhone(cloudUser.email, cloudUser.phoneNumber).replace(/\D/g, '')
     : '';
   const isAdminUser = currentUserPhone === ADMIN_PHONE;
+
+  const navItems = isAdminUser
+    ? [
+        ...BASE_NAV_ITEMS,
+        { id: 'admin' as NavTab, label: 'Admin Panel', mobileLabel: 'Admin', icon: ShieldCheck },
+      ]
+    : BASE_NAV_ITEMS;
 
   // Control AdMob Ads based on Pro Status
   useEffect(() => {
@@ -373,23 +378,6 @@ export default function App() {
       isRestoringRef.current = false;
     }
     await syncNowToCloud(loggedInUser);
-  };
-
-  const handleAdminPlanChange = async (planType: 'monthly' | 'yearly' | 'free') => {
-    setAdminBusy(true);
-    try {
-      const msg = await adminSetUserProPlan(adminTargetPhone, planType);
-      showToast(msg);
-      if (adminTargetPhone.replace(/\D/g, '') === currentUserPhone && cloudUser) {
-        const updated = await getUserProStatus(cloudUser.uid, currentUserPhone);
-        setProStatus(updated);
-      }
-      setAdminTargetPhone('');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Activation mein masla aaya.', 'error');
-    } finally {
-      setAdminBusy(false);
-    }
   };
 
   const openWhatsAppPaymentProof = () => {
@@ -968,19 +956,31 @@ export default function App() {
           <div className="flex items-center gap-2">
             <PWAInstallButton />
 
-            <button
-              type="button"
-              onClick={() => setProModalOpen(true)}
-              className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-extrabold transition ${
-                proStatus.isPro
-                  ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
-                  : 'border-amber-400 bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xs hover:opacity-95'
-              }`}
-              title="Pro Ad-Free Version"
-            >
-              <Crown className="h-3.5 w-3.5" />
-              <span>{isAdminUser ? 'Pro / Admin' : proStatus.isPro ? 'Pro VIP' : 'Go Pro'}</span>
-            </button>
+            {isAdminUser ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab('admin')}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-slate-900 px-3 text-xs font-extrabold text-amber-400 shadow-xs transition hover:bg-slate-800"
+                title="Open Super Admin Dashboard"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>Admin Panel</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setProModalOpen(true)}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-extrabold transition ${
+                  proStatus.isPro
+                    ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                    : 'border-amber-400 bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xs hover:opacity-95'
+                }`}
+                title="Pro Ad-Free Version"
+              >
+                <Crown className="h-3.5 w-3.5" />
+                <span>{proStatus.isPro ? 'Pro VIP' : 'Go Pro'}</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1008,7 +1008,7 @@ export default function App() {
 
         <nav className="hidden border-t border-slate-100 bg-slate-50/70 lg:block">
           <div className="mx-auto flex max-w-7xl items-center gap-1 px-6 py-1.5">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
               return (
@@ -1167,13 +1167,23 @@ export default function App() {
                 onError={(msg) => showToast(msg, 'error')}
               />
             )}
+
+            {activeTab === 'admin' && isAdminUser && (
+              <AdminDashboardView
+                onToast={showToast}
+                onAdminSelfPlanChanged={async () => {
+                  const updated = await getUserProStatus(cloudUser.uid, currentUserPhone);
+                  setProStatus(updated);
+                }}
+              />
+            )}
           </>
         )}
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-xs lg:hidden">
-        <div className="grid grid-cols-6 py-1">
-          {NAV_ITEMS.map((item) => {
+        <div className={`grid py-1 ${isAdminUser ? 'grid-cols-7' : 'grid-cols-6'}`}>
+          {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
             return (
@@ -1193,7 +1203,7 @@ export default function App() {
         </div>
       </nav>
 
-      {/* GO PRO (AD-FREE SUBSCRIPTION) & ADMIN MODAL */}
+      {/* GO PRO (AD-FREE SUBSCRIPTION) MODAL FOR CUSTOMERS */}
       {proModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
           <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
@@ -1311,55 +1321,6 @@ export default function App() {
                     <span>Send Payment Screenshot on WhatsApp</span>
                   </button>
                 </>
-              )}
-
-              {/* ADMIN ONLY: 1-CLICK PRO ACTIVATION PANEL */}
-              {isAdminUser && (
-                <div className="mt-4 rounded-2xl border-2 border-blue-200 bg-blue-50/70 p-4">
-                  <div className="flex items-center gap-1.5 text-xs font-black text-blue-900">
-                    <ShieldCheck className="h-4 w-4 text-blue-700" />
-                    <span>Admin Panel — Activate Pro User</span>
-                  </div>
-                  <p className="mt-1 text-[11px] text-blue-800">
-                    Customer ka 11-hindso wala registered number likh kar Pro active karein:
-                  </p>
-                  <input
-                    type="tel"
-                    maxLength={11}
-                    value={adminTargetPhone}
-                    onChange={(e) =>
-                      setAdminTargetPhone(e.target.value.replace(/\D/g, '').slice(0, 11))
-                    }
-                    placeholder="03001234567"
-                    className="mt-2 h-10 w-full rounded-xl border border-blue-300 bg-white px-3 font-mono text-sm font-bold text-slate-900 outline-none focus:border-blue-600"
-                  />
-                  <div className="mt-2.5 grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      disabled={adminBusy}
-                      onClick={() => handleAdminPlanChange('monthly')}
-                      className="h-9 rounded-lg bg-blue-700 px-2 text-[11px] font-extrabold text-white hover:bg-blue-800 disabled:opacity-50"
-                    >
-                      1 Month Pro
-                    </button>
-                    <button
-                      type="button"
-                      disabled={adminBusy}
-                      onClick={() => handleAdminPlanChange('yearly')}
-                      className="h-9 rounded-lg bg-emerald-600 px-2 text-[11px] font-extrabold text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      1 Year Pro
-                    </button>
-                    <button
-                      type="button"
-                      disabled={adminBusy}
-                      onClick={() => handleAdminPlanChange('free')}
-                      className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-                    >
-                      Set Free
-                    </button>
-                  </div>
-                </div>
               )}
             </div>
           </div>
